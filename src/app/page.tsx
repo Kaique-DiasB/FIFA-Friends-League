@@ -1,79 +1,110 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { TournamentState } from '../types/tournament';
+import { useRouter } from 'next/navigation';
+import { TournamentState, Match, Standing, StageDef, StageId } from '../types/tournament';
 import {
-  generateDefaultState,
   calculateStandings,
   generateSummaryText,
-  checkGroupStageComplete,
-  initializeQuarterfinals,
-  checkQuarterfinalsComplete,
-  getQuarterfinalWinner,
-  initializeSemifinals,
-  checkSemifinalsComplete,
-  getSemifinalResult,
-  getThirdPlaceWinner,
+  resolveKnockoutSeedPool,
+  advanceKnockoutStages,
+  resolveStageOutcomes,
+  migrateLegacyState,
   encodeState,
+  getVisibleStages,
 } from '../utils/tournamentHelpers';
+import { useToast } from '../utils/useToast';
 import TournamentHeader from '../components/TournamentHeader';
 import ParticipantsEditor from '../components/ParticipantsEditor';
 import GroupStage from '../components/GroupStage';
 import StandingsTable from '../components/StandingsTable';
-import QuarterfinalsBracket from '../components/QuarterfinalsBracket';
-import SemifinalsBracket from '../components/SemifinalsBracket';
-import FinalMatch from '../components/FinalMatch';
-import ThirdPlaceMatch from '../components/ThirdPlaceMatch';
+import KnockoutStagePanel from '../components/KnockoutStagePanel';
 import ChampionCard from '../components/ChampionCard';
 import ResetTournamentDialog from '../components/ResetTournamentDialog';
 import KnockoutAndPodium from '../components/KnockoutAndPodium';
 
-import { 
-  Users, 
-  Calendar, 
-  ListOrdered, 
+import {
+  Users,
+  Calendar,
+  ListOrdered,
   GitCommit,
-  GitMerge, 
-  Trophy, 
-  Award
+  GitMerge,
+  Trophy,
+  Award,
+  Shuffle,
+  LayoutGrid,
+  LucideIcon,
 } from 'lucide-react';
 
+const STAGE_ICON: Record<StageId, LucideIcon> = {
+  prelim: Shuffle,
+  round_of_16: LayoutGrid,
+  quarterfinals: GitCommit,
+  semifinals: GitMerge,
+  final: Trophy,
+  third_place: Award,
+};
+
+type TabKey = 'participants' | 'groups' | 'standings' | 'bracket' | StageId;
+
+// Re-derives knockoutMatches/championId from the current groupMatches — the single
+// recomputation step every score edit (and the initial load) runs through.
+function recomputeKnockout(state: TournamentState): TournamentState {
+  const config = state.config;
+  const groups: ('A' | 'B')[] = config.groupCount === 2 ? ['A', 'B'] : config.groupCount === 1 ? ['A'] : [];
+  const standingsByGroup: Partial<Record<'A' | 'B', Standing[]>> = {};
+  groups.forEach(g => {
+    standingsByGroup[g] = calculateStandings(g, state.participants, state.groupMatches);
+  });
+
+  const pool = resolveKnockoutSeedPool(config, state.participants, state.groupMatches, standingsByGroup);
+  const knockoutMatches = advanceKnockoutStages(config, pool, state.knockoutMatches);
+
+  const finalStage = config.stages.find(s => s.id === 'final');
+  const championId = finalStage
+    ? resolveStageOutcomes(finalStage, knockoutMatches).winners[0] ?? null
+    : null;
+
+  return { ...state, knockoutMatches, championId };
+}
+
+function getPreviousBracketStage(config: TournamentState['config'], stageId: StageId): StageDef | null {
+  const chain = getVisibleStages(config).filter(s => s.id !== 'third_place');
+  if (stageId === 'third_place') {
+    const finalIdx = chain.findIndex(s => s.id === 'final');
+    return finalIdx > 0 ? chain[finalIdx - 1] : null;
+  }
+  const idx = chain.findIndex(s => s.id === stageId);
+  return idx > 0 ? chain[idx - 1] : null;
+}
+
 export default function Home() {
+  const router = useRouter();
   const [state, setState] = useState<TournamentState | null>(null);
   const [isHydrated, setIsHydrated] = useState(false);
-  const [activeTab, setActiveTab] = useState<'participants' | 'groups' | 'standings' | 'qf' | 'semis' | 'third_place' | 'final' | 'bracket'>('participants');
+  const [activeTab, setActiveTab] = useState<TabKey>('participants');
   const [isResetOpen, setIsResetOpen] = useState(false);
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const { toastMessage, showToast } = useToast();
 
-  // Load from API on mount (with localStorage fallback and migration)
+  // Load from API on mount (with localStorage fallback and migration); redirect to the
+  // setup wizard when no championship exists anywhere yet.
   useEffect(() => {
     async function loadState() {
       try {
-        console.log("Carregando dados do campeonato do servidor SQLite...");
         const res = await fetch('/api/tournament', {
           headers: { 'ngrok-skip-browser-warning': 'true' }
         });
         const data = await res.json();
-        
-        let loadedState: TournamentState | null = data.state;
-        
-        // If server is empty, check localStorage to migrate
+
+        let loadedState: TournamentState | null = data.state ? migrateLegacyState(data.state) : null;
+
         if (!loadedState) {
-          console.log("Banco de dados SQLite vazio. Verificando localStorage para migração...");
           const saved = localStorage.getItem('fifa_tournament_state');
           if (saved) {
             try {
               const parsed = JSON.parse(saved);
               if (parsed && Array.isArray(parsed.participants) && Array.isArray(parsed.groupMatches)) {
-                loadedState = {
-                  ...parsed,
-                  qfMatches: Array.isArray(parsed.qfMatches) ? parsed.qfMatches : [],
-                  sfMatches: Array.isArray(parsed.sfMatches) ? parsed.sfMatches : [],
-                  thirdPlaceMatch: parsed.thirdPlaceMatch || null,
-                };
-                
-                console.log("Migrando dados anteriores para o SQLite...");
-                // Migrate to SQLite database on the server
+                loadedState = migrateLegacyState(parsed);
                 await fetch('/api/tournament/migrate', {
                   method: 'POST',
                   headers: {
@@ -88,70 +119,45 @@ export default function Home() {
             }
           }
         }
-        
-        if (loadedState) {
-          loadedState = {
-            ...loadedState,
-            qfMatches: Array.isArray(loadedState.qfMatches) ? loadedState.qfMatches : [],
-            sfMatches: Array.isArray(loadedState.sfMatches) ? loadedState.sfMatches : [],
-            thirdPlaceMatch: loadedState.thirdPlaceMatch || null,
-          };
-        }
-        
-        // If still no state (fresh project), generate default and save to SQLite
+
         if (!loadedState) {
-          console.log("Nenhum dado encontrado localmente. Inicializando campeonato novo...");
-          loadedState = generateDefaultState();
-          await fetch('/api/tournament', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'ngrok-skip-browser-warning': 'true'
-            },
-            body: JSON.stringify({ state: loadedState }),
-          });
+          router.replace('/onboarding');
+          return;
         }
-        
-        // Auto-initialize QF if group matches are complete but QF is empty
-        if (checkGroupStageComplete(loadedState.groupMatches) && (!loadedState.qfMatches || loadedState.qfMatches.length === 0)) {
-          console.log("Fase de grupos completa! Inicializando Quartas de Final...");
-          const standingsA = calculateStandings('A', loadedState.participants, loadedState.groupMatches);
-          const standingsB = calculateStandings('B', loadedState.participants, loadedState.groupMatches);
-          loadedState.qfMatches = initializeQuarterfinals(standingsA, standingsB);
-          
-          // Save the auto-initialized QF back to server
-          await fetch('/api/tournament', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'ngrok-skip-browser-warning': 'true'
-            },
-            body: JSON.stringify({ state: loadedState }),
-          });
-        }
-        
-        console.log("Dados carregados com sucesso.");
+
+        loadedState = recomputeKnockout(loadedState);
+        await fetch('/api/tournament', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'ngrok-skip-browser-warning': 'true'
+          },
+          body: JSON.stringify({ state: loadedState }),
+        });
+
         setState(loadedState);
         setIsHydrated(true);
       } catch (err) {
         console.error('Error loading state from SQLite API:', err);
-        // Fallback to local storage if API is completely unreachable
-        const saved = localStorage.getItem('fifa_tournament_state') || JSON.stringify(generateDefaultState());
-        setState(JSON.parse(saved));
-        setIsHydrated(true);
+        const saved = localStorage.getItem('fifa_tournament_state');
+        if (saved) {
+          setState(recomputeKnockout(migrateLegacyState(JSON.parse(saved))));
+          setIsHydrated(true);
+        } else {
+          router.replace('/onboarding');
+        }
       }
     }
-    
+
     loadState();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Save to API (and backup to localStorage) on state change
   useEffect(() => {
     if (isHydrated && state) {
-      // 1. Local backup
       localStorage.setItem('fifa_tournament_state', JSON.stringify(state));
-      
-      // 2. Server save
+
       fetch('/api/tournament', {
         method: 'POST',
         headers: {
@@ -165,15 +171,6 @@ export default function Home() {
     }
   }, [state, isHydrated]);
 
-  // Toast helper
-  const showToast = (message: string) => {
-    setToastMessage(message);
-    setTimeout(() => {
-      setToastMessage(prev => (prev === message ? null : prev));
-    }, 3000);
-  };
-
-  // Names map for fast lookup
   const namesMap = useMemo(() => {
     const map: Record<string, string> = {};
     if (state) {
@@ -195,7 +192,8 @@ export default function Home() {
     );
   }
 
-  // Update participant name
+  const config = state.config;
+
   const handleUpdateName = (id: string, name: string) => {
     setState(prev => {
       if (!prev) return null;
@@ -206,37 +204,43 @@ export default function Home() {
     });
   };
 
-  // Restore default participant names
+  const handleUpdateTeam = (id: string, team: string) => {
+    setState(prev => {
+      if (!prev) return null;
+      return {
+        ...prev,
+        participants: prev.participants.map(p => (p.id === id ? { ...p, team } : p)),
+      };
+    });
+  };
+
   const handleRestoreDefaults = () => {
     setState(prev => {
       if (!prev) return null;
-      const defaultNames = [
-        'Participante A1', 'Participante A2', 'Participante A3', 'Participante A4', 'Participante A5',
-        'Participante B1', 'Participante B2', 'Participante B3', 'Participante B4', 'Participante B5'
-      ];
       return {
         ...prev,
-        participants: prev.participants.map((p, i) => ({ ...p, name: defaultNames[i] })),
+        participants: prev.participants.map(p => ({ ...p, name: `Jogador ${p.seed}`, team: '' })),
       };
     });
     showToast('Nomes restaurados para os padrões.');
   };
 
-  // Reset entire tournament
-  const handleConfirmReset = () => {
-    setState(generateDefaultState());
-    setActiveTab('participants');
-    showToast('Campeonato reiniciado com sucesso.');
+  const handleConfirmReset = async () => {
+    try {
+      await fetch('/api/tournament', { method: 'DELETE' });
+    } catch (err) {
+      console.error('Failed to delete tournament state:', err);
+    }
+    localStorage.removeItem('fifa_tournament_state');
+    router.push('/onboarding');
   };
 
-  // Copy Summary text
   const handleCopySummary = () => {
     const text = generateSummaryText(state, namesMap);
     navigator.clipboard.writeText(text);
     showToast('Resumo copiado para a área de transferência!');
   };
 
-  // Export JSON
   const handleExportJSON = () => {
     const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(state, null, 2));
     const downloadAnchor = document.createElement('a');
@@ -248,14 +252,12 @@ export default function Home() {
     showToast('Arquivo JSON exportado com sucesso!');
   };
 
-  // Import JSON
   const handleImportJSON = (importedState: TournamentState) => {
-    setState(importedState);
+    setState(recomputeKnockout(migrateLegacyState(importedState)));
     setActiveTab('participants');
     showToast('Configurações importadas com sucesso!');
   };
 
-  // Share standings link
   const handleShareStandings = () => {
     if (!state) return;
     const encoded = encodeState(state);
@@ -264,7 +266,6 @@ export default function Home() {
     showToast('Link de classificação copiado!');
   };
 
-  // Update scores and recalculate brackets
   const handleUpdateScores = (
     matchId: string,
     homeScore: number | null,
@@ -275,238 +276,49 @@ export default function Home() {
     setState(prev => {
       if (!prev) return null;
 
-      // Update Group stage match
-      const nextGroupMatches = prev.groupMatches.map(m => {
-        if (m.id === matchId) {
-          const completed = homeScore !== null && awayScore !== null;
-          return { ...m, homeScore, awayScore, completed };
-        }
-        return m;
-      });
-
-      // Update Quarterfinals match
-      let nextQfMatches = prev.qfMatches || [];
-      if (nextQfMatches.some(m => m.id === matchId)) {
-        nextQfMatches = nextQfMatches.map(m => {
-          if (m.id === matchId) {
-            const completed = homeScore !== null && awayScore !== null;
-            return {
-              ...m,
-              homeScore,
-              awayScore,
-              homePenalties: homePenalties !== undefined ? homePenalties : m.homePenalties,
-              awayPenalties: awayPenalties !== undefined ? awayPenalties : m.awayPenalties,
-              completed,
-            };
-          }
-          return m;
-        });
-      }
-
-      // Update Semifinals match
-      let nextSfMatches = prev.sfMatches || [];
-      if (nextSfMatches.some(m => m.id === matchId)) {
-        nextSfMatches = nextSfMatches.map(m => {
-          if (m.id === matchId) {
-            const completed = homeScore !== null && awayScore !== null;
-            return {
-              ...m,
-              homeScore,
-              awayScore,
-              homePenalties: homePenalties !== undefined ? homePenalties : m.homePenalties,
-              awayPenalties: awayPenalties !== undefined ? awayPenalties : m.awayPenalties,
-              completed,
-            };
-          }
-          return m;
-        });
-      }
-
-      // Update Final match
-      let nextFinalMatch = prev.finalMatch;
-      if (nextFinalMatch && nextFinalMatch.id === matchId) {
+      const patchMatch = (m: Match): Match => {
+        if (m.id !== matchId) return m;
         const completed = homeScore !== null && awayScore !== null;
-        nextFinalMatch = {
-          ...nextFinalMatch,
+        return {
+          ...m,
           homeScore,
           awayScore,
-          homePenalties: homePenalties !== undefined ? homePenalties : nextFinalMatch.homePenalties,
-          awayPenalties: awayPenalties !== undefined ? awayPenalties : nextFinalMatch.awayPenalties,
+          homePenalties: homePenalties !== undefined ? homePenalties : m.homePenalties,
+          awayPenalties: awayPenalties !== undefined ? awayPenalties : m.awayPenalties,
           completed,
         };
-      }
-
-      // Update Third Place match
-      let nextThirdPlaceMatch = prev.thirdPlaceMatch;
-      if (nextThirdPlaceMatch && nextThirdPlaceMatch.id === matchId) {
-        const completed = homeScore !== null && awayScore !== null;
-        nextThirdPlaceMatch = {
-          ...nextThirdPlaceMatch,
-          homeScore,
-          awayScore,
-          homePenalties: homePenalties !== undefined ? homePenalties : nextThirdPlaceMatch.homePenalties,
-          awayPenalties: awayPenalties !== undefined ? awayPenalties : nextThirdPlaceMatch.awayPenalties,
-          completed,
-        };
-      }
-
-      // Recalculate standings and stages
-      const standingsA = calculateStandings('A', prev.participants, nextGroupMatches);
-      const standingsB = calculateStandings('B', prev.participants, nextGroupMatches);
-      const groupComplete = checkGroupStageComplete(nextGroupMatches);
-
-      // Quarterfinals generation check
-      if (groupComplete) {
-        if (nextQfMatches.length === 0) {
-          nextQfMatches = initializeQuarterfinals(standingsA, standingsB);
-        } else {
-          // Update host/guest IDs in case names or standings changed but keep scores
-          const qfFixtures = initializeQuarterfinals(standingsA, standingsB);
-          nextQfMatches = nextQfMatches.map((m, idx) => {
-            const fixture = qfFixtures[idx];
-            if (fixture) {
-              return { ...m, homeId: fixture.homeId, awayId: fixture.awayId };
-            }
-            return m;
-          });
-        }
-      } else {
-        // Clear if group stage was modified to be incomplete
-        nextQfMatches = [];
-        nextSfMatches = [];
-        nextFinalMatch = null;
-        nextThirdPlaceMatch = null;
-      }
-
-      // Semifinals generation check
-      const qfComplete = checkQuarterfinalsComplete(nextQfMatches);
-      if (groupComplete && qfComplete) {
-        if (nextSfMatches.length === 0) {
-          nextSfMatches = initializeSemifinals(nextQfMatches);
-        } else {
-          // Update host/guest IDs based on QF winners, keeping scores
-          const sfFixtures = initializeSemifinals(nextQfMatches);
-          nextSfMatches = nextSfMatches.map((m, idx) => {
-            const fixture = sfFixtures[idx];
-            if (fixture) {
-              return { ...m, homeId: fixture.homeId, awayId: fixture.awayId };
-            }
-            return m;
-          });
-        }
-      } else {
-        nextSfMatches = [];
-        nextFinalMatch = null;
-        nextThirdPlaceMatch = null;
-      }
-
-      // Final generation check
-      const sfComplete = checkSemifinalsComplete(nextSfMatches, nextQfMatches);
-      if (groupComplete && qfComplete && sfComplete) {
-        const qf1Match = nextQfMatches.find(m => m.id === 'qf1')!;
-        const qf2Match = nextQfMatches.find(m => m.id === 'qf2')!;
-        const qf3Match = nextQfMatches.find(m => m.id === 'qf3')!;
-        const qf4Match = nextQfMatches.find(m => m.id === 'qf4')!;
-
-        const w1 = getQuarterfinalWinner(qf1Match)!;
-        const w2 = getQuarterfinalWinner(qf2Match)!;
-        const w3 = getQuarterfinalWinner(qf3Match)!;
-        const w4 = getQuarterfinalWinner(qf4Match)!;
-
-        const sf1Ida = nextSfMatches.find(m => m.id === 'sf1_ida')!;
-        const sf1Volta = nextSfMatches.find(m => m.id === 'sf1_volta')!;
-        const sf2Ida = nextSfMatches.find(m => m.id === 'sf2_ida')!;
-        const sf2Volta = nextSfMatches.find(m => m.id === 'sf2_volta')!;
-
-        const res1 = getSemifinalResult(sf1Ida, sf1Volta, w1, w3);
-        const res2 = getSemifinalResult(sf2Ida, sf2Volta, w4, w2);
-
-        if (res1.winnerId && res2.winnerId) {
-          if (!nextFinalMatch) {
-            nextFinalMatch = {
-              id: 'final',
-              stage: 'final',
-              round: 1,
-              homeId: res1.winnerId,
-              awayId: res2.winnerId,
-              completed: false,
-            };
-          } else {
-            nextFinalMatch = {
-              ...nextFinalMatch,
-              homeId: res1.winnerId,
-              awayId: res2.winnerId,
-            };
-          }
-
-          // Losers from Semifinals play in third place match
-          const l1 = res1.winnerId === w1 ? w3 : w1;
-          const l2 = res2.winnerId === w4 ? w2 : w4;
-          if (!nextThirdPlaceMatch) {
-            nextThirdPlaceMatch = {
-              id: 'third_place',
-              stage: 'third_place',
-              round: 1,
-              homeId: l1,
-              awayId: l2,
-              completed: false,
-            };
-          } else {
-            nextThirdPlaceMatch = {
-              ...nextThirdPlaceMatch,
-              homeId: l1,
-              awayId: l2,
-            };
-          }
-        }
-      } else {
-        nextFinalMatch = null;
-        nextThirdPlaceMatch = null;
-      }
-
-      // Champion calculation check
-      let championId: string | null = null;
-      if (groupComplete && qfComplete && sfComplete && nextFinalMatch && nextFinalMatch.completed) {
-        const hs = nextFinalMatch.homeScore ?? 0;
-        const as = nextFinalMatch.awayScore ?? 0;
-        if (hs > as) {
-          championId = nextFinalMatch.homeId;
-        } else if (as > hs) {
-          championId = nextFinalMatch.awayId;
-        } else {
-          // Tied, check penalties
-          const hp = nextFinalMatch.homePenalties;
-          const ap = nextFinalMatch.awayPenalties;
-          if (hp !== null && hp !== undefined && ap !== null && ap !== undefined) {
-            if (hp > ap) {
-              championId = nextFinalMatch.homeId;
-            } else if (ap > hp) {
-              championId = nextFinalMatch.awayId;
-            }
-          }
-        }
-      }
-
-      return {
-        ...prev,
-        groupMatches: nextGroupMatches,
-        qfMatches: nextQfMatches,
-        sfMatches: nextSfMatches,
-        finalMatch: nextFinalMatch,
-        thirdPlaceMatch: nextThirdPlaceMatch,
-        championId,
       };
+
+      const next: TournamentState = {
+        ...prev,
+        groupMatches: prev.groupMatches.map(patchMatch),
+        knockoutMatches: prev.knockoutMatches.map(patchMatch),
+      };
+
+      return recomputeKnockout(next);
     });
 
     showToast('Placar atualizado com sucesso!');
   };
 
-  const standingsA = calculateStandings('A', state.participants, state.groupMatches);
-  const standingsB = calculateStandings('B', state.participants, state.groupMatches);
+  const visibleStages = getVisibleStages(config);
+  const activeStageDef = visibleStages.find(s => s.id === activeTab) ?? null;
+
+  const tabs: { key: TabKey; label: string; icon: LucideIcon }[] = [
+    { key: 'participants', label: 'Participantes', icon: Users },
+    ...(config.hasGroupStage
+      ? [
+          { key: 'groups' as TabKey, label: 'Fase de Grupos', icon: Calendar },
+          { key: 'standings' as TabKey, label: 'Classificação FG', icon: ListOrdered },
+        ]
+      : []),
+    ...visibleStages.map(s => ({ key: s.id as TabKey, label: s.label, icon: STAGE_ICON[s.id] })),
+    { key: 'bracket', label: 'Chaveamento & Pódio', icon: Award },
+  ];
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col font-sans selection:bg-emerald-500 selection:text-black">
-      
+
       {/* Toast Notification */}
       {toastMessage && (
         <div className="fixed bottom-5 right-5 z-50 flex items-center gap-2 rounded-xl bg-zinc-900 border border-emerald-500/30 px-4 py-3 text-sm font-bold text-emerald-400 shadow-2xl animate-fade-in">
@@ -517,7 +329,7 @@ export default function Home() {
 
       {/* Screen Layout */}
       <div className="print-hidden flex-1 max-w-7xl mx-auto w-full p-4 sm:p-6 lg:p-8 space-y-6">
-        
+
         {/* Header */}
         <TournamentHeader
           state={state}
@@ -531,101 +343,23 @@ export default function Home() {
 
         {/* Tab Navigation */}
         <nav className="flex overflow-x-auto rounded-xl bg-zinc-900 p-1 border border-zinc-800 scrollbar-none">
-          <button
-            onClick={() => setActiveTab('participants')}
-            className={`flex items-center gap-1.5 rounded-lg px-4 py-2.5 text-xs font-bold uppercase tracking-wider transition-all duration-200 whitespace-nowrap ${
-              activeTab === 'participants'
-                ? 'bg-emerald-500 text-black shadow-lg shadow-emerald-500/20'
-                : 'text-zinc-400 hover:text-white hover:bg-zinc-850'
-            }`}
-          >
-            <Users className="h-4 w-4" />
-            <span>Participantes</span>
-          </button>
-          
-          <button
-            onClick={() => setActiveTab('groups')}
-            className={`flex items-center gap-1.5 rounded-lg px-4 py-2.5 text-xs font-bold uppercase tracking-wider transition-all duration-200 whitespace-nowrap ${
-              activeTab === 'groups'
-                ? 'bg-emerald-500 text-black shadow-lg shadow-emerald-500/20'
-                : 'text-zinc-400 hover:text-white hover:bg-zinc-850'
-            }`}
-          >
-            <Calendar className="h-4 w-4" />
-            <span>Fase de Grupos</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('standings')}
-            className={`flex items-center gap-1.5 rounded-lg px-4 py-2.5 text-xs font-bold uppercase tracking-wider transition-all duration-200 whitespace-nowrap ${
-              activeTab === 'standings'
-                ? 'bg-emerald-500 text-black shadow-lg shadow-emerald-500/20'
-                : 'text-zinc-400 hover:text-white hover:bg-zinc-850'
-            }`}
-          >
-            <ListOrdered className="h-4 w-4" />
-            <span>Classificação FG</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('qf')}
-            className={`flex items-center gap-1.5 rounded-lg px-4 py-2.5 text-xs font-bold uppercase tracking-wider transition-all duration-200 whitespace-nowrap ${
-              activeTab === 'qf'
-                ? 'bg-emerald-500 text-black shadow-lg shadow-emerald-500/20'
-                : 'text-zinc-400 hover:text-white hover:bg-zinc-850'
-            }`}
-          >
-            <GitCommit className="h-4 w-4" />
-            <span>Quartas</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('semis')}
-            className={`flex items-center gap-1.5 rounded-lg px-4 py-2.5 text-xs font-bold uppercase tracking-wider transition-all duration-200 whitespace-nowrap ${
-              activeTab === 'semis'
-                ? 'bg-emerald-500 text-black shadow-lg shadow-emerald-500/20'
-                : 'text-zinc-400 hover:text-white hover:bg-zinc-850'
-            }`}
-          >
-            <GitMerge className="h-4 w-4" />
-            <span>Semifinais</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('third_place')}
-            className={`flex items-center gap-1.5 rounded-lg px-4 py-2.5 text-xs font-bold uppercase tracking-wider transition-all duration-200 whitespace-nowrap ${
-              activeTab === 'third_place'
-                ? 'bg-emerald-500 text-black shadow-lg shadow-emerald-500/20'
-                : 'text-zinc-400 hover:text-white hover:bg-zinc-850'
-            }`}
-          >
-            <Award className="h-4 w-4" />
-            <span>3º Lugar</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('final')}
-            className={`flex items-center gap-1.5 rounded-lg px-4 py-2.5 text-xs font-bold uppercase tracking-wider transition-all duration-200 whitespace-nowrap ${
-              activeTab === 'final'
-                ? 'bg-emerald-500 text-black shadow-lg shadow-emerald-500/20'
-                : 'text-zinc-400 hover:text-white hover:bg-zinc-850'
-            }`}
-          >
-            <Trophy className="h-4 w-4" />
-            <span>Final</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('bracket')}
-            className={`flex items-center gap-1.5 rounded-lg px-4 py-2.5 text-xs font-bold uppercase tracking-wider transition-all duration-200 whitespace-nowrap ${
-              activeTab === 'bracket'
-                ? 'bg-emerald-500 text-black shadow-lg shadow-emerald-500/20'
-                : 'text-zinc-400 hover:text-white hover:bg-zinc-850'
-            }`}
-          >
-            <Award className="h-4 w-4" />
-            <span>Chaveamento & Pódio</span>
-          </button>
+          {tabs.map(tab => {
+            const Icon = tab.icon;
+            return (
+              <button
+                key={tab.key}
+                onClick={() => setActiveTab(tab.key)}
+                className={`flex items-center gap-1.5 rounded-lg px-4 py-2.5 text-xs font-bold uppercase tracking-wider transition-all duration-200 whitespace-nowrap ${
+                  activeTab === tab.key
+                    ? 'bg-emerald-500 text-black shadow-lg shadow-emerald-500/20'
+                    : 'text-zinc-400 hover:text-white hover:bg-zinc-850'
+                }`}
+              >
+                <Icon className="h-4 w-4" />
+                <span>{tab.label}</span>
+              </button>
+            );
+          })}
         </nav>
 
         {/* Tab Contents */}
@@ -634,68 +368,68 @@ export default function Home() {
             <ParticipantsEditor
               participants={state.participants}
               onUpdateName={handleUpdateName}
+              onUpdateTeam={handleUpdateTeam}
               onRestoreDefaults={handleRestoreDefaults}
             />
           )}
 
-          {activeTab === 'groups' && (
+          {activeTab === 'groups' && config.hasGroupStage && (
             <GroupStage
               groupMatches={state.groupMatches}
+              participants={state.participants}
               namesMap={namesMap}
               onUpdateScores={handleUpdateScores}
             />
           )}
 
-          {activeTab === 'standings' && (
+          {activeTab === 'standings' && config.hasGroupStage && (
             <StandingsTable
               participants={state.participants}
               groupMatches={state.groupMatches}
               namesMap={namesMap}
+              qualifiersPerGroup={config.qualifiersPerGroup}
             />
           )}
 
-          {activeTab === 'qf' && (
-            <QuarterfinalsBracket
-              groupMatches={state.groupMatches}
-              qfMatches={state.qfMatches || []}
-              standingsA={standingsA}
-              standingsB={standingsB}
-              namesMap={namesMap}
-              onUpdateScores={handleUpdateScores}
-            />
-          )}
-
-          {activeTab === 'semis' && (
-            <SemifinalsBracket
-              qfMatches={state.qfMatches || []}
-              sfMatches={state.sfMatches}
-              namesMap={namesMap}
-              onUpdateScores={handleUpdateScores}
-            />
-          )}
-
-          {activeTab === 'third_place' && (
-            <ThirdPlaceMatch
-              qfMatches={state.qfMatches || []}
-              sfMatches={state.sfMatches}
-              thirdPlaceMatch={state.thirdPlaceMatch}
-              namesMap={namesMap}
-              onUpdateScores={handleUpdateScores}
-            />
-          )}
-
-          {activeTab === 'final' && (
+          {activeStageDef && (
             <div className="space-y-6">
-              {state.championId && (
+              {activeStageDef.id === 'final' && state.championId && (
                 <ChampionCard championName={namesMap[state.championId] || state.championId} />
               )}
-              <FinalMatch
-                qfMatches={state.qfMatches || []}
-                sfMatches={state.sfMatches}
-                finalMatch={state.finalMatch}
-                namesMap={namesMap}
-                onUpdateScores={handleUpdateScores}
-              />
+              {(() => {
+                const stageMatches = state.knockoutMatches.filter(m => m.stage === activeStageDef.id);
+                const previousStage = getPreviousBracketStage(config, activeStageDef.id);
+                const locked = stageMatches.length === 0;
+
+                let lockedMessage: string | undefined;
+                let progress: { completed: number; total: number } | undefined;
+
+                if (locked) {
+                  if (previousStage) {
+                    lockedMessage = `Esta fase será liberada assim que a fase "${previousStage.label}" for concluída.`;
+                    const outcome = resolveStageOutcomes(previousStage, state.knockoutMatches);
+                    progress = { completed: outcome.winners.length, total: previousStage.slotCount };
+                  } else if (config.hasGroupStage) {
+                    lockedMessage = 'Esta fase será liberada assim que a fase de grupos for concluída.';
+                    progress = {
+                      completed: state.groupMatches.filter(m => m.completed).length,
+                      total: state.groupMatches.length,
+                    };
+                  }
+                }
+
+                return (
+                  <KnockoutStagePanel
+                    stageDef={activeStageDef}
+                    matches={stageMatches}
+                    namesMap={namesMap}
+                    onUpdateScores={handleUpdateScores}
+                    locked={locked}
+                    lockedMessage={lockedMessage}
+                    progress={progress}
+                  />
+                );
+              })()}
             </div>
           )}
 
@@ -711,184 +445,7 @@ export default function Home() {
       </div>
 
       {/* Print-Only Layout */}
-      <div className="hidden print:block bg-white text-black p-8 max-w-4xl mx-auto space-y-8 font-sans">
-        <div className="text-center border-b border-gray-300 pb-4">
-          <h1 className="text-3xl font-extrabold uppercase tracking-tight">Campeonato de FIFA</h1>
-          <p className="text-sm text-gray-500 mt-1">Relatório Geral do Torneio • Gerado em {new Date().toLocaleDateString('pt-BR')}</p>
-        </div>
-
-        {/* Print Champion */}
-        {state.championId && (
-          <div className="border border-yellow-400 bg-yellow-50 p-6 rounded-lg text-center space-y-2">
-            <h2 className="text-sm font-bold text-yellow-600 uppercase tracking-widest">Campeão</h2>
-            <h1 className="text-3xl font-black text-gray-900 uppercase">{namesMap[state.championId] || state.championId}</h1>
-          </div>
-        )}
-
-        {/* Print Standings */}
-        <div className="space-y-4">
-          <h2 className="text-lg font-bold border-b border-gray-300 pb-1">Tabela de Classificação</h2>
-          <div className="grid grid-cols-2 gap-8">
-            {/* Group A */}
-            <div>
-              <h3 className="font-bold text-sm text-gray-700 mb-2">Grupo A</h3>
-              <table className="w-full text-xs text-left">
-                <thead>
-                  <tr className="border-b font-bold text-gray-600">
-                    <th className="py-1">Pos</th>
-                    <th className="py-1">Jogador</th>
-                    <th className="py-1 text-center">PTS</th>
-                    <th className="py-1 text-center">J</th>
-                    <th className="py-1 text-center">V</th>
-                    <th className="py-1 text-center">E</th>
-                    <th className="py-1 text-center">D</th>
-                    <th className="py-1 text-center">SG</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {standingsA.map((s, i) => (
-                    <tr key={s.participantId} className="border-b">
-                      <td className="py-1.5 font-bold">{i + 1}º</td>
-                      <td className="py-1.5">{namesMap[s.participantId] || s.participantId}</td>
-                      <td className="py-1.5 text-center font-bold">{s.points}</td>
-                      <td className="py-1.5 text-center">{s.games}</td>
-                      <td className="py-1.5 text-center">{s.wins}</td>
-                      <td className="py-1.5 text-center">{s.draws}</td>
-                      <td className="py-1.5 text-center">{s.losses}</td>
-                      <td className="py-1.5 text-center">{s.goalDifference}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Group B */}
-            <div>
-              <h3 className="font-bold text-sm text-gray-700 mb-2">Grupo B</h3>
-              <table className="w-full text-xs text-left">
-                <thead>
-                  <tr className="border-b font-bold text-gray-600">
-                    <th className="py-1">Pos</th>
-                    <th className="py-1">Jogador</th>
-                    <th className="py-1 text-center">PTS</th>
-                    <th className="py-1 text-center">J</th>
-                    <th className="py-1 text-center">V</th>
-                    <th className="py-1 text-center">E</th>
-                    <th className="py-1 text-center">D</th>
-                    <th className="py-1 text-center">SG</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {standingsB.map((s, i) => (
-                    <tr key={s.participantId} className="border-b">
-                      <td className="py-1.5 font-bold">{i + 1}º</td>
-                      <td className="py-1.5">{namesMap[s.participantId] || s.participantId}</td>
-                      <td className="py-1.5 text-center font-bold">{s.points}</td>
-                      <td className="py-1.5 text-center">{s.games}</td>
-                      <td className="py-1.5 text-center">{s.wins}</td>
-                      <td className="py-1.5 text-center">{s.draws}</td>
-                      <td className="py-1.5 text-center">{s.losses}</td>
-                      <td className="py-1.5 text-center">{s.goalDifference}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-
-        {/* Print Playoff Results */}
-        <div className="space-y-4 pt-4 border-t border-gray-300">
-          <h2 className="text-lg font-bold border-b border-gray-300 pb-1">Fase Eliminatória</h2>
-          
-          <div className="space-y-6">
-            {/* Quartas de Final print */}
-            <div className="space-y-2">
-              <h3 className="font-bold text-sm text-gray-700">Quartas de Final</h3>
-              {state.qfMatches && state.qfMatches.length === 4 ? (
-                <div className="grid grid-cols-2 gap-4 text-xs">
-                  {state.qfMatches.map((m, idx) => (
-                    <div key={m.id}>
-                      <span className="font-semibold text-gray-600">Jogo {idx + 1}: </span>
-                      <span>
-                        {namesMap[m.homeId] || m.homeId} {m.homeScore !== null ? m.homeScore : '-'} x {m.awayScore !== null ? m.awayScore : '-'} {namesMap[m.awayId] || m.awayId}
-                        {m.homePenalties !== null && ` (Pênaltis: ${m.homePenalties} x ${m.awayPenalties})`}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-xs text-gray-500 italic">Quartas de final pendentes.</p>
-              )}
-            </div>
-
-            <div className="grid grid-cols-3 gap-8 pt-2 border-t border-dashed border-gray-200">
-              {/* Semifinals print */}
-              <div className="space-y-3">
-                <h3 className="font-bold text-sm text-gray-700">Semifinais</h3>
-                {state.sfMatches && state.sfMatches.length === 4 ? (
-                  <div className="text-xs space-y-3">
-                    <div>
-                      <p className="font-semibold text-gray-600">Semifinal 1:</p>
-                      <p className="ml-2">
-                        Ida: {namesMap[state.sfMatches[0].homeId] || state.sfMatches[0].homeId} {state.sfMatches[0].homeScore} x {state.sfMatches[0].awayScore} {namesMap[state.sfMatches[0].awayId] || state.sfMatches[0].awayId}
-                      </p>
-                      <p className="ml-2">
-                        Volta: {namesMap[state.sfMatches[1].homeId] || state.sfMatches[1].homeId} {state.sfMatches[1].homeScore} x {state.sfMatches[1].awayScore} {namesMap[state.sfMatches[1].awayId] || state.sfMatches[1].awayId}
-                        {state.sfMatches[1].homePenalties !== null && ` (Pênaltis: ${state.sfMatches[1].homePenalties} x ${state.sfMatches[1].awayPenalties})`}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="font-semibold text-gray-600">Semifinal 2:</p>
-                      <p className="ml-2">
-                        Ida: {namesMap[state.sfMatches[2].homeId] || state.sfMatches[2].homeId} {state.sfMatches[2].homeScore} x {state.sfMatches[2].awayScore} {namesMap[state.sfMatches[2].awayId] || state.sfMatches[2].awayId}
-                      </p>
-                      <p className="ml-2">
-                        Volta: {namesMap[state.sfMatches[3].homeId] || state.sfMatches[3].homeId} {state.sfMatches[3].homeScore} x {state.sfMatches[3].awayScore} {namesMap[state.sfMatches[3].awayId] || state.sfMatches[3].awayId}
-                        {state.sfMatches[3].homePenalties !== null && ` (Pênaltis: ${state.sfMatches[3].homePenalties} x ${state.sfMatches[3].awayPenalties})`}
-                      </p>
-                    </div>
-                  </div>
-                ) : (
-                  <p className="text-xs text-gray-500 italic">Semifinais pendentes.</p>
-                )}
-              </div>
-
-              {/* Third Place print */}
-              <div className="space-y-3">
-                <h3 className="font-bold text-sm text-gray-700">Disputa de 3º Lugar</h3>
-                {state.thirdPlaceMatch ? (
-                  <div className="text-xs">
-                    <p className="font-semibold text-gray-600">Confronto único:</p>
-                    <p className="ml-2 text-sm font-bold mt-1">
-                      {namesMap[state.thirdPlaceMatch.homeId] || state.thirdPlaceMatch.homeId} {state.thirdPlaceMatch.homeScore !== null ? state.thirdPlaceMatch.homeScore : '-'} x {state.thirdPlaceMatch.awayScore !== null ? state.thirdPlaceMatch.awayScore : '-'} {namesMap[state.thirdPlaceMatch.awayId] || state.thirdPlaceMatch.awayId}
-                      {state.thirdPlaceMatch.homePenalties !== null && ` (Pênaltis: ${state.thirdPlaceMatch.homePenalties} x ${state.thirdPlaceMatch.awayPenalties})`}
-                    </p>
-                  </div>
-                ) : (
-                  <p className="text-xs text-gray-500 italic">Disputa pendente.</p>
-                )}
-              </div>
-
-              {/* Final print */}
-              <div className="space-y-3">
-                <h3 className="font-bold text-sm text-gray-700">Grande Final</h3>
-                {state.finalMatch ? (
-                  <div className="text-xs">
-                    <p className="font-semibold text-gray-600">Confronto único:</p>
-                    <p className="ml-2 text-sm font-bold mt-1">
-                      {namesMap[state.finalMatch.homeId] || state.finalMatch.homeId} {state.finalMatch.homeScore !== null ? state.finalMatch.homeScore : '-'} x {state.finalMatch.awayScore !== null ? state.finalMatch.awayScore : '-'} {namesMap[state.finalMatch.awayId] || state.finalMatch.awayId}
-                      {state.finalMatch.homePenalties !== null && ` (Pênaltis: ${state.finalMatch.homePenalties} x ${state.finalMatch.awayPenalties})`}
-                    </p>
-                  </div>
-                ) : (
-                  <p className="text-xs text-gray-500 italic">Final pendente.</p>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+      <PrintView state={state} namesMap={namesMap} />
 
       {/* Confirmation dialog for reset */}
       <ResetTournamentDialog
@@ -896,6 +453,110 @@ export default function Home() {
         onClose={() => setIsResetOpen(false)}
         onConfirm={handleConfirmReset}
       />
+    </div>
+  );
+}
+
+function PrintView({ state, namesMap }: { state: TournamentState; namesMap: Record<string, string> }) {
+  const config = state.config;
+  const groups: ('A' | 'B')[] = config.groupCount === 2 ? ['A', 'B'] : config.groupCount === 1 ? ['A'] : [];
+  const stages = getVisibleStages(config);
+
+  return (
+    <div className="hidden print:block bg-white text-black p-8 max-w-4xl mx-auto space-y-8 font-sans">
+      <div className="text-center border-b border-gray-300 pb-4">
+        <h1 className="text-3xl font-extrabold uppercase tracking-tight">Campeonato de FIFA</h1>
+        <p className="text-sm text-gray-500 mt-1">Relatório Geral do Torneio • Gerado em {new Date().toLocaleDateString('pt-BR')}</p>
+      </div>
+
+      {state.championId && (
+        <div className="border border-yellow-400 bg-yellow-50 p-6 rounded-lg text-center space-y-2">
+          <h2 className="text-sm font-bold text-yellow-600 uppercase tracking-widest">Campeão</h2>
+          <h1 className="text-3xl font-black text-gray-900 uppercase">{namesMap[state.championId] || state.championId}</h1>
+        </div>
+      )}
+
+      {groups.length > 0 && (
+        <div className="space-y-4">
+          <h2 className="text-lg font-bold border-b border-gray-300 pb-1">Tabela de Classificação</h2>
+          <div className={`grid gap-8 ${groups.length === 2 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+            {groups.map(g => (
+              <div key={g}>
+                <h3 className="font-bold text-sm text-gray-700 mb-2">Grupo {g}</h3>
+                <table className="w-full text-xs text-left">
+                  <thead>
+                    <tr className="border-b font-bold text-gray-600">
+                      <th className="py-1">Pos</th>
+                      <th className="py-1">Jogador</th>
+                      <th className="py-1 text-center">PTS</th>
+                      <th className="py-1 text-center">J</th>
+                      <th className="py-1 text-center">V</th>
+                      <th className="py-1 text-center">E</th>
+                      <th className="py-1 text-center">D</th>
+                      <th className="py-1 text-center">SG</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {calculateStandings(g, state.participants, state.groupMatches).map((s, i) => (
+                      <tr key={s.participantId} className="border-b">
+                        <td className="py-1.5 font-bold">{i + 1}º</td>
+                        <td className="py-1.5">{namesMap[s.participantId] || s.participantId}</td>
+                        <td className="py-1.5 text-center font-bold">{s.points}</td>
+                        <td className="py-1.5 text-center">{s.games}</td>
+                        <td className="py-1.5 text-center">{s.wins}</td>
+                        <td className="py-1.5 text-center">{s.draws}</td>
+                        <td className="py-1.5 text-center">{s.losses}</td>
+                        <td className="py-1.5 text-center">{s.goalDifference}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="space-y-4 pt-4 border-t border-gray-300">
+        <h2 className="text-lg font-bold border-b border-gray-300 pb-1">Fase Eliminatória</h2>
+        <div className={`grid gap-8 ${stages.length >= 3 ? 'grid-cols-3' : stages.length === 2 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+          {stages.map(stageDef => {
+            const stageMatches = state.knockoutMatches.filter(m => m.stage === stageDef.id);
+            const bySlot = new Map<number, Match[]>();
+            stageMatches.forEach(m => {
+              const list = bySlot.get(m.slot) ?? [];
+              list.push(m);
+              bySlot.set(m.slot, list);
+            });
+            const slots = Array.from(bySlot.keys()).sort((a, b) => a - b);
+
+            return (
+              <div key={stageDef.id} className="space-y-2">
+                <h3 className="font-bold text-sm text-gray-700">{stageDef.label}</h3>
+                {slots.length === 0 ? (
+                  <p className="text-xs text-gray-500 italic">Pendente.</p>
+                ) : (
+                  <div className="text-xs space-y-2">
+                    {slots.map(slot => {
+                      const legs = (bySlot.get(slot) ?? []).sort((a, b) => a.leg - b.leg);
+                      return (
+                        <div key={slot}>
+                          {legs.map(m => (
+                            <p key={m.id} className="ml-2">
+                              {namesMap[m.homeId] || m.homeId} {m.completed ? `${m.homeScore} x ${m.awayScore}` : '-'} {namesMap[m.awayId] || m.awayId}
+                              {m.completed && m.homeScore === m.awayScore && m.homePenalties != null && ` (Pênaltis: ${m.homePenalties} x ${m.awayPenalties})`}
+                            </p>
+                          ))}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }

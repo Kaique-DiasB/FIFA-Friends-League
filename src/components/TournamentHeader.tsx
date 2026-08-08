@@ -34,6 +34,20 @@ export default function TournamentHeader({
   onShareStandings,
 }: TournamentHeaderProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const config = state.config;
+
+  const groupsLabel = config.hasGroupStage
+    ? `${config.groupCount} ${config.groupCount === 1 ? 'grupo' : 'grupos'}`
+    : 'Mata-mata';
+  const groupsCaption = config.hasGroupStage
+    ? (config.groupCount === 2 ? 'A e B' : 'Grupo A')
+    : 'Sem fase de grupos';
+
+  const qualifiedLabel = config.hasGroupStage ? `${config.qualifiersPerGroup} por grupo` : '—';
+  const qualifiedCaption = config.hasGroupStage ? 'avançam para o mata-mata' : 'todos entram direto';
+
+  const finalStage = config.stages.find(s => s.id === 'final');
+  const finalFormatLabel = finalStage?.legs === 2 ? 'Ida e Volta' : 'Jogo Único';
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -169,8 +183,8 @@ export default function TournamentHeader({
             <Layers className="h-4 w-4 text-emerald-500" />
           </div>
           <div className="mt-2 flex items-baseline gap-2">
-            <span className="text-2xl font-black text-white">2</span>
-            <span className="text-xs font-medium text-zinc-500">A e B (5 cada)</span>
+            <span className="text-2xl font-black text-white">{groupsLabel}</span>
+            <span className="text-xs font-medium text-zinc-500">{groupsCaption}</span>
           </div>
         </div>
 
@@ -183,8 +197,8 @@ export default function TournamentHeader({
             <Award className="h-4 w-4 text-emerald-500" />
           </div>
           <div className="mt-2 flex items-baseline gap-2">
-            <span className="text-2xl font-black text-white">4 por grupo</span>
-            <span className="text-xs font-medium text-zinc-500">avançam para QF</span>
+            <span className="text-2xl font-black text-white">{qualifiedLabel}</span>
+            <span className="text-xs font-medium text-zinc-500">{qualifiedCaption}</span>
           </div>
         </div>
 
@@ -198,7 +212,7 @@ export default function TournamentHeader({
           </div>
           <div className="mt-2 flex items-baseline gap-2">
             <span className="text-lg font-black text-white uppercase tracking-tight">
-              Jogo Único
+              {finalFormatLabel}
             </span>
             <span className="text-xs font-medium text-zinc-500">com pênaltis</span>
           </div>

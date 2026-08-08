@@ -39,3 +39,12 @@ export function saveTournamentState(stateJson: string) {
     throw e;
   }
 }
+
+export function deleteTournamentState() {
+  try {
+    db.prepare('DELETE FROM tournament WHERE id = 1').run();
+  } catch (e) {
+    console.error('Error deleting from SQLite database:', e);
+    throw e;
+  }
+}

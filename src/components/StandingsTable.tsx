@@ -7,15 +7,18 @@ interface StandingsTableProps {
   participants: Participant[];
   groupMatches: Match[];
   namesMap: Record<string, string>;
+  qualifiersPerGroup: number;
 }
 
 export default function StandingsTable({
   participants,
   groupMatches,
   namesMap,
+  qualifiersPerGroup,
 }: StandingsTableProps) {
-  const standingsA = calculateStandings('A', participants, groupMatches);
-  const standingsB = calculateStandings('B', participants, groupMatches);
+  const groups = Array.from(
+    new Set(groupMatches.map(m => m.groupId).filter((g): g is 'A' | 'B' => !!g))
+  ).sort();
 
   const renderTable = (standings: Standing[], groupLabel: string) => {
     return (
@@ -51,15 +54,15 @@ export default function StandingsTable({
             </thead>
             <tbody>
               {standings.map((s, index) => {
-                const isQualified = index < 4;
+                const isQualified = index < qualifiersPerGroup;
                 const name = namesMap[s.participantId] || s.participantId;
-                
+
                 return (
                   <tr
                     key={s.participantId}
                     className={`border-b border-zinc-850/50 transition-colors hover:bg-zinc-850/30 ${
-                      isQualified 
-                        ? 'bg-emerald-500/[0.02] text-zinc-200' 
+                      isQualified
+                        ? 'bg-emerald-500/[0.02] text-zinc-200'
                         : ''
                     }`}
                   >
@@ -68,10 +71,10 @@ export default function StandingsTable({
                       <div className="flex items-center gap-2">
                         {/* Position badge */}
                         <span className={`flex h-6 w-6 items-center justify-center rounded-lg text-xs font-black ${
-                          index === 0 
-                            ? 'bg-amber-500 text-black' 
-                            : index === 1 
-                            ? 'bg-zinc-350 text-black' 
+                          index === 0
+                            ? 'bg-amber-500 text-black'
+                            : index === 1
+                            ? 'bg-zinc-350 text-black'
                             : 'bg-zinc-800 text-zinc-400'
                         }`}>
                           {index + 1}
@@ -81,7 +84,7 @@ export default function StandingsTable({
                         {isQualified && (
                           <span className="flex items-center gap-0.5 rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-emerald-400 border border-emerald-500/25">
                             <Check className="h-2 w-2" />
-                            QF
+                            Classifica
                           </span>
                         )}
                       </div>
@@ -131,10 +134,10 @@ export default function StandingsTable({
 
                     {/* SG */}
                     <td className={`py-3.5 text-center font-bold ${
-                      s.goalDifference > 0 
-                        ? 'text-emerald-400' 
-                        : s.goalDifference < 0 
-                        ? 'text-red-400' 
+                      s.goalDifference > 0
+                        ? 'text-emerald-400'
+                        : s.goalDifference < 0
+                        ? 'text-red-400'
                         : 'text-zinc-400'
                     }`}>
                       {s.goalDifference > 0 ? `+${s.goalDifference}` : s.goalDifference}
@@ -145,20 +148,25 @@ export default function StandingsTable({
             </tbody>
           </table>
         </div>
-        
+
         {/* Caption */}
         <div className="mt-4 flex items-center gap-1.5 text-xs text-zinc-500">
           <div className="h-2 w-2 rounded-full bg-emerald-500/30"></div>
-          <span>Os quatro primeiros classificados avançam para as quartas de final.</span>
+          <span>Os {qualifiersPerGroup} primeiros colocados avançam para o mata-mata.</span>
         </div>
       </div>
     );
   };
 
+  const gridColsClass = groups.length >= 2 ? 'md:grid-cols-2' : 'md:grid-cols-1';
+
   return (
-    <div className="grid gap-6 md:grid-cols-2">
-      {renderTable(standingsA, 'A')}
-      {renderTable(standingsB, 'B')}
+    <div className={`grid gap-6 ${gridColsClass}`}>
+      {groups.map(g => (
+        <React.Fragment key={g}>
+          {renderTable(calculateStandings(g, participants, groupMatches), g)}
+        </React.Fragment>
+      ))}
     </div>
   );
 }

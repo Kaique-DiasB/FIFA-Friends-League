@@ -15,6 +15,7 @@ interface MatchCardProps {
   showPenalties?: boolean;
   readOnly?: boolean;
   winnerId?: string | null;
+  stageLabel?: string;
 }
 
 export default function MatchCard({
@@ -24,6 +25,7 @@ export default function MatchCard({
   showPenalties = false,
   readOnly = false,
   winnerId,
+  stageLabel,
 }: MatchCardProps) {
   const homeName = namesMap[match.homeId] || match.homeId;
   const awayName = namesMap[match.awayId] || match.awayId;
@@ -98,7 +100,7 @@ export default function MatchCard({
       {/* Header with Match ID / Status Badge */}
       <div className="mb-3 flex items-center justify-between">
         <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
-          {match.groupId ? `Grupo ${match.groupId} • Rodada ${match.round}` : 'Fase Eliminatória'}
+          {match.groupId ? `Grupo ${match.groupId} • Rodada ${match.round}` : stageLabel || 'Fase Eliminatória'}
         </span>
 
         {match.completed ? (

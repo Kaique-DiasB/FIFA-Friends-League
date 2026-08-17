@@ -29,11 +29,11 @@ export default function ResetTournamentDialog({
             <div>
               <h3 className="text-lg font-bold text-white">Reiniciar Campeonato</h3>
               <p className="mt-1 text-sm text-zinc-400">
-                Tem certeza que deseja apagar todos os dados do campeonato?
+                Tem certeza que deseja apagar este campeonato e começar um novo?
               </p>
             </div>
           </div>
-          <button 
+          <button
             onClick={onClose}
             className="rounded-lg p-1 text-zinc-400 hover:bg-zinc-800 hover:text-white transition-colors"
           >
@@ -42,12 +42,13 @@ export default function ResetTournamentDialog({
         </div>
 
         <div className="mt-4 text-sm text-zinc-400 bg-zinc-950/50 p-3 rounded-lg border border-zinc-850">
-          Esta ação é irreversível e irá redefinir:
+          Esta ação é irreversível e irá apagar:
           <ul className="list-disc pl-5 mt-2 space-y-1">
-            <li>Todos os nomes de participantes para os padrões.</li>
-            <li>Todos os placares e status de partidas para pendentes.</li>
-            <li>A tabela de classificação e fases finais.</li>
+            <li>Todos os participantes e times cadastrados.</li>
+            <li>Todos os placares e status de partidas.</li>
+            <li>A tabela de classificação e o chaveamento atual.</li>
           </ul>
+          Você voltará para a configuração inicial para criar um novo campeonato.
         </div>
 
         <div className="mt-6 flex justify-end gap-3">

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getTournamentState, saveTournamentState } from '@/utils/db';
+import { getTournamentState, saveTournamentState, deleteTournamentState } from '@/utils/db';
 
 export async function GET() {
   try {
@@ -25,5 +25,15 @@ export async function POST(req: Request) {
   } catch (e) {
     console.error(e);
     return NextResponse.json({ error: 'Failed to save database' }, { status: 500 });
+  }
+}
+
+export async function DELETE() {
+  try {
+    deleteTournamentState();
+    return NextResponse.json({ success: true });
+  } catch (e) {
+    console.error(e);
+    return NextResponse.json({ error: 'Failed to delete database' }, { status: 500 });
   }
 }

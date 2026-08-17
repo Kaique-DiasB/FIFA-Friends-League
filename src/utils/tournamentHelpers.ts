@@ -1,74 +1,4 @@
-import { Participant, Match, Standing, TournamentState } from '../types/tournament';
-
-// Static fixtures index mapping (1-based index of players in group)
-export const GROUP_STAGE_FIXTURE = [
-  // Round 1
-  { round: 1, homeIdx: 2, awayIdx: 5, byeIdx: 1 },
-  { round: 1, homeIdx: 3, awayIdx: 4, byeIdx: 1 },
-  // Round 2
-  { round: 2, homeIdx: 1, awayIdx: 5, byeIdx: 4 },
-  { round: 2, homeIdx: 2, awayIdx: 3, byeIdx: 4 },
-  // Round 3
-  { round: 3, homeIdx: 1, awayIdx: 4, byeIdx: 2 },
-  { round: 3, homeIdx: 5, awayIdx: 3, byeIdx: 2 },
-  // Round 4
-  { round: 4, homeIdx: 1, awayIdx: 3, byeIdx: 5 },
-  { round: 4, homeIdx: 4, awayIdx: 2, byeIdx: 5 },
-  // Round 5
-  { round: 5, homeIdx: 1, awayIdx: 2, byeIdx: 3 },
-  { round: 5, homeIdx: 4, awayIdx: 5, byeIdx: 3 },
-];
-
-export const DEFAULT_PARTICIPANTS: Participant[] = [
-  { id: 'a1', name: 'Participante A1', groupId: 'A' },
-  { id: 'a2', name: 'Participante A2', groupId: 'A' },
-  { id: 'a3', name: 'Participante A3', groupId: 'A' },
-  { id: 'a4', name: 'Participante A4', groupId: 'A' },
-  { id: 'a5', name: 'Participante A5', groupId: 'A' },
-  { id: 'b1', name: 'Participante B1', groupId: 'B' },
-  { id: 'b2', name: 'Participante B2', groupId: 'B' },
-  { id: 'b3', name: 'Participante B3', groupId: 'B' },
-  { id: 'b4', name: 'Participante B4', groupId: 'B' },
-  { id: 'b5', name: 'Participante B5', groupId: 'B' },
-];
-
-export function generateGroupMatches(group: 'A' | 'B'): Match[] {
-  const matches: Match[] = [];
-  GROUP_STAGE_FIXTURE.forEach((f, index) => {
-    matches.push({
-      id: `group_${group.toLowerCase()}_r${f.round}_m${(index % 2) + 1}`,
-      stage: 'groups',
-      groupId: group,
-      round: f.round,
-      homeId: `${group.toLowerCase()}${f.homeIdx}`,
-      awayId: `${group.toLowerCase()}${f.awayIdx}`,
-      completed: false,
-    });
-  });
-  return matches;
-}
-
-export function getRoundBye(group: 'A' | 'B', round: number): string {
-  const f = GROUP_STAGE_FIXTURE.find(item => item.round === round);
-  if (!f) return '';
-  return `${group.toLowerCase()}${f.byeIdx}`;
-}
-
-export function generateDefaultState(): TournamentState {
-  const groupMatches = [
-    ...generateGroupMatches('A'),
-    ...generateGroupMatches('B'),
-  ];
-  return {
-    participants: DEFAULT_PARTICIPANTS,
-    groupMatches,
-    qfMatches: [],
-    sfMatches: [],
-    finalMatch: null,
-    thirdPlaceMatch: null,
-    championId: null,
-  };
-}
+import { Participant, Match, Standing, TournamentState, StageId, StageDef, ChampionshipConfig } from '../types/tournament';
 
 export function calculateStandings(
   groupId: 'A' | 'B',
@@ -179,415 +109,6 @@ export function checkGroupStageComplete(matches: Match[]): boolean {
   return groupMatches.length > 0 && groupMatches.every(m => m.completed);
 }
 
-export function initializeQuarterfinals(
-  standingsA: Standing[],
-  standingsB: Standing[]
-): Match[] {
-  if (standingsA.length < 4 || standingsB.length < 4) return [];
-
-  const firstA = standingsA[0].participantId;
-  const secondA = standingsA[1].participantId;
-  const thirdA = standingsA[2].participantId;
-  const fourthA = standingsA[3].participantId;
-
-  const firstB = standingsB[0].participantId;
-  const secondB = standingsB[1].participantId;
-  const thirdB = standingsB[2].participantId;
-  const fourthB = standingsB[3].participantId;
-
-  return [
-    // QF1: 1º Grupo A  vs  4º Grupo B
-    {
-      id: 'qf1',
-      stage: 'quarterfinals',
-      round: 1,
-      homeId: firstA,
-      awayId: fourthB,
-      completed: false,
-    },
-    // QF2: 2º Grupo B  vs  3º Grupo A
-    {
-      id: 'qf2',
-      stage: 'quarterfinals',
-      round: 1,
-      homeId: secondB,
-      awayId: thirdA,
-      completed: false,
-    },
-    // QF3: 2º Grupo A  vs  3º Grupo B
-    {
-      id: 'qf3',
-      stage: 'quarterfinals',
-      round: 1,
-      homeId: secondA,
-      awayId: thirdB,
-      completed: false,
-    },
-    // QF4: 1º Grupo B  vs  4º Grupo A
-    {
-      id: 'qf4',
-      stage: 'quarterfinals',
-      round: 1,
-      homeId: firstB,
-      awayId: fourthA,
-      completed: false,
-    },
-  ];
-}
-
-export function checkQuarterfinalsComplete(qfMatches: Match[]): boolean {
-  if (qfMatches.length !== 4) return false;
-  return qfMatches.every(m => {
-    if (!m.completed) return false;
-    const hs = m.homeScore ?? 0;
-    const as = m.awayScore ?? 0;
-    if (hs !== as) return true;
-    
-    // Check penalties if tied
-    const hp = m.homePenalties;
-    const ap = m.awayPenalties;
-    return hp !== null && hp !== undefined && ap !== null && ap !== undefined && hp !== ap;
-  });
-}
-
-export function getQuarterfinalWinner(match: Match): string | null {
-  if (!match.completed) return null;
-  const hs = match.homeScore ?? 0;
-  const as = match.awayScore ?? 0;
-  if (hs > as) return match.homeId;
-  if (as > hs) return match.awayId;
-  
-  const hp = match.homePenalties;
-  const ap = match.awayPenalties;
-  if (hp !== null && hp !== undefined && ap !== null && ap !== undefined) {
-    if (hp > ap) return match.homeId;
-    if (ap > hp) return match.awayId;
-  }
-  return null;
-}
-
-export function getThirdPlaceWinner(match: Match | null): string | null {
-  if (!match || !match.completed) return null;
-  const hs = match.homeScore;
-  const as = match.awayScore;
-  const hp = match.homePenalties;
-  const ap = match.awayPenalties;
-  if (hs !== undefined && hs !== null && as !== undefined && as !== null) {
-    if (hs > as) return match.homeId;
-    if (as > hs) return match.awayId;
-    if (hp !== undefined && hp !== null && ap !== undefined && ap !== null) {
-      if (hp > ap) return match.homeId;
-      if (ap > hp) return match.awayId;
-    }
-  }
-  return null;
-}
-
-export function initializeSemifinals(
-  qfMatches: Match[]
-): Match[] {
-  if (qfMatches.length !== 4) return [];
-
-  const qf1Match = qfMatches.find(m => m.id === 'qf1')!;
-  const qf2Match = qfMatches.find(m => m.id === 'qf2')!;
-  const qf3Match = qfMatches.find(m => m.id === 'qf3')!;
-  const qf4Match = qfMatches.find(m => m.id === 'qf4')!;
-
-  if (!qf1Match || !qf2Match || !qf3Match || !qf4Match) return [];
-
-  const w1 = getQuarterfinalWinner(qf1Match);
-  const w2 = getQuarterfinalWinner(qf2Match);
-  const w3 = getQuarterfinalWinner(qf3Match);
-  const w4 = getQuarterfinalWinner(qf4Match);
-
-  if (!w1 || !w2 || !w3 || !w4) return [];
-
-  return [
-    // Semifinal 1: Vencedor QF1 x Vencedor QF3
-    {
-      id: 'sf1_ida',
-      stage: 'semifinals',
-      round: 1, // Ida
-      homeId: w1,
-      awayId: w3,
-      completed: false,
-    },
-    {
-      id: 'sf1_volta',
-      stage: 'semifinals',
-      round: 2, // Volta
-      homeId: w3,
-      awayId: w1,
-      completed: false,
-    },
-    // Semifinal 2: Vencedor QF4 x Vencedor QF2
-    {
-      id: 'sf2_ida',
-      stage: 'semifinals',
-      round: 1, // Ida
-      homeId: w4,
-      awayId: w2,
-      completed: false,
-    },
-    {
-      id: 'sf2_volta',
-      stage: 'semifinals',
-      round: 2, // Volta
-      homeId: w2,
-      awayId: w4,
-      completed: false,
-    },
-  ];
-}
-
-export interface SemifinalResult {
-  winnerId: string | null;
-  team1Id: string;
-  team2Id: string;
-  team1Agg: number;
-  team2Agg: number;
-  isTied: boolean;
-  team1Pen?: number | null;
-  team2Pen?: number | null;
-}
-
-export function getSemifinalResult(
-  ida: Match,
-  volta: Match,
-  team1Id: string,
-  team2Id: string
-): SemifinalResult {
-  const result: SemifinalResult = {
-    winnerId: null,
-    team1Id,
-    team2Id,
-    team1Agg: 0,
-    team2Agg: 0,
-    isTied: false,
-  };
-
-  if (!ida || !volta || !ida.completed || !volta.completed) {
-    return result;
-  }
-
-  const h1 = ida.homeScore ?? 0;
-  const a1 = ida.awayScore ?? 0;
-  const h2 = volta.homeScore ?? 0;
-  const a2 = volta.awayScore ?? 0;
-
-  // team1Id is home in ida, away in volta
-  // team2Id is away in ida, home in volta
-  const team1Agg = h1 + a2;
-  const team2Agg = a1 + h2;
-
-  result.team1Agg = team1Agg;
-  result.team2Agg = team2Agg;
-
-  if (team1Agg > team2Agg) {
-    result.winnerId = team1Id;
-  } else if (team2Agg > team1Agg) {
-    result.winnerId = team2Id;
-  } else {
-    result.isTied = true;
-    const team1Pen = volta.awayPenalties; // team1 is away in volta
-    const team2Pen = volta.homePenalties; // team2 is home in volta
-    result.team1Pen = team1Pen;
-    result.team2Pen = team2Pen;
-
-    if (
-      team1Pen !== undefined &&
-      team1Pen !== null &&
-      team2Pen !== undefined &&
-      team2Pen !== null
-    ) {
-      if (team1Pen > team2Pen) {
-        result.winnerId = team1Id;
-      } else if (team2Pen > team1Pen) {
-        result.winnerId = team2Id;
-      }
-    }
-  }
-
-  return result;
-}
-
-export function checkSemifinalsComplete(
-  sfMatches: Match[],
-  qfMatches: Match[]
-): boolean {
-  if (sfMatches.length !== 4) return false;
-  if (!sfMatches.every(m => m.completed)) return false;
-
-  const qf1Match = qfMatches.find(m => m.id === 'qf1')!;
-  const qf2Match = qfMatches.find(m => m.id === 'qf2')!;
-  const qf3Match = qfMatches.find(m => m.id === 'qf3')!;
-  const qf4Match = qfMatches.find(m => m.id === 'qf4')!;
-
-  const w1 = getQuarterfinalWinner(qf1Match);
-  const w2 = getQuarterfinalWinner(qf2Match);
-  const w3 = getQuarterfinalWinner(qf3Match);
-  const w4 = getQuarterfinalWinner(qf4Match);
-
-  if (!w1 || !w2 || !w3 || !w4) return false;
-
-  const sf1Ida = sfMatches.find(m => m.id === 'sf1_ida')!;
-  const sf1Volta = sfMatches.find(m => m.id === 'sf1_volta')!;
-  const sf2Ida = sfMatches.find(m => m.id === 'sf2_ida')!;
-  const sf2Volta = sfMatches.find(m => m.id === 'sf2_volta')!;
-
-  const res1 = getSemifinalResult(sf1Ida, sf1Volta, w1, w3);
-  const res2 = getSemifinalResult(sf2Ida, sf2Volta, w4, w2);
-
-  return res1.winnerId !== null && res2.winnerId !== null;
-}
-
-export function generateSummaryText(
-  state: TournamentState,
-  namesMap: Record<string, string>
-): string {
-  const standingsA = calculateStandings('A', state.participants, state.groupMatches);
-  const standingsB = calculateStandings('B', state.participants, state.groupMatches);
-
-  let text = `=== CAMPEONATO DE FIFA - RESUMO DO TORNEIO ===\n\n`;
-
-  // Participants
-  text += `PARTICIPANTES:\n`;
-  text += `Grupo A:\n`;
-  state.participants.filter(p => p.groupId === 'A').forEach(p => {
-    text += ` - ${p.name}\n`;
-  });
-  text += `Grupo B:\n`;
-  state.participants.filter(p => p.groupId === 'B').forEach(p => {
-    text += ` - ${p.name}\n`;
-  });
-  text += `\n`;
-
-  // Standings
-  const renderStandingRow = (s: Standing, rank: number) => {
-    const name = namesMap[s.participantId] || '';
-    return `${rank}º ${name.padEnd(20)} | PTS: ${s.points} | J: ${s.games} | V: ${s.wins} | E: ${s.draws} | D: ${s.losses} | GP: ${s.goalsFor} | GC: ${s.goalsAgainst} | SG: ${s.goalDifference}\n`;
-  };
-
-  text += `CLASSIFICAÇÃO:\n`;
-  text += `Grupo A:\n`;
-  standingsA.forEach((s, i) => {
-    text += renderStandingRow(s, i + 1);
-  });
-  text += `\nGrupo B:\n`;
-  standingsB.forEach((s, i) => {
-    text += renderStandingRow(s, i + 1);
-  });
-  text += `\n`;
-
-  // Group Matches
-  text += `RESULTADOS DA FASE DE GRUPOS:\n`;
-  for (let r = 1; r <= 5; r++) {
-    text += `Rodada ${r}:\n`;
-    text += ` Grupo A:\n`;
-    state.groupMatches.filter(m => m.groupId === 'A' && m.round === r).forEach(m => {
-      const home = namesMap[m.homeId] || '';
-      const away = namesMap[m.awayId] || '';
-      const score = m.completed ? `${m.homeScore} x ${m.awayScore}` : 'Pendente';
-      text += `   ${home} ${score} ${away}\n`;
-    });
-    text += ` Grupo B:\n`;
-    state.groupMatches.filter(m => m.groupId === 'B' && m.round === r).forEach(m => {
-      const home = namesMap[m.homeId] || '';
-      const away = namesMap[m.awayId] || '';
-      const score = m.completed ? `${m.homeScore} x ${m.awayScore}` : 'Pendente';
-      text += `   ${home} ${score} ${away}\n`;
-    });
-  }
-  text += `\n`;
-
-  // Quarterfinals
-  if (state.qfMatches && state.qfMatches.length === 4) {
-    text += `QUARTAS DE FINAL:\n`;
-    state.qfMatches.forEach((m, idx) => {
-      const home = namesMap[m.homeId] || '';
-      const away = namesMap[m.awayId] || '';
-      const score = m.completed ? `${m.homeScore} x ${m.awayScore}` : 'Pendente';
-      const penText = m.completed && m.homeScore === m.awayScore && m.homePenalties !== null && m.awayPenalties !== null
-        ? ` (Pênaltis: ${m.homePenalties} x ${m.awayPenalties})`
-        : '';
-      text += `   Jogo ${idx + 1}: ${home} ${score} ${away}${penText}\n`;
-    });
-    text += `\n`;
-  }
-
-  // Semifinals
-  if (state.sfMatches.length === 4) {
-    text += `SEMIFINAIS:\n`;
-    const sf1Ida = state.sfMatches.find(m => m.id === 'sf1_ida')!;
-    const sf1Volta = state.sfMatches.find(m => m.id === 'sf1_volta')!;
-    const sf2Ida = state.sfMatches.find(m => m.id === 'sf2_ida')!;
-    const sf2Volta = state.sfMatches.find(m => m.id === 'sf2_volta')!;
-
-    const qf1Match = state.qfMatches.find(m => m.id === 'qf1')!;
-    const qf2Match = state.qfMatches.find(m => m.id === 'qf2')!;
-    const qf3Match = state.qfMatches.find(m => m.id === 'qf3')!;
-    const qf4Match = state.qfMatches.find(m => m.id === 'qf4')!;
-
-    const w1 = getQuarterfinalWinner(qf1Match) || 'Vencedor QF1';
-    const w2 = getQuarterfinalWinner(qf2Match) || 'Vencedor QF2';
-    const w3 = getQuarterfinalWinner(qf3Match) || 'Vencedor QF3';
-    const w4 = getQuarterfinalWinner(qf4Match) || 'Vencedor QF4';
-
-    const res1 = getSemifinalResult(sf1Ida, sf1Volta, w1, w3);
-    const res2 = getSemifinalResult(sf2Ida, sf2Volta, w4, w2);
-
-    text += ` Semifinal 1:\n`;
-    text += `   Ida:   ${namesMap[sf1Ida.homeId] || sf1Ida.homeId} ${sf1Ida.completed ? sf1Ida.homeScore : '-'} x ${sf1Ida.completed ? sf1Ida.awayScore : '-'} ${namesMap[sf1Ida.awayId] || sf1Ida.awayId}\n`;
-    text += `   Volta: ${namesMap[sf1Volta.homeId] || sf1Volta.homeId} ${sf1Volta.completed ? sf1Volta.homeScore : '-'} x ${sf1Volta.completed ? sf1Volta.awayScore : '-'} ${namesMap[sf1Volta.awayId] || sf1Volta.awayId}\n`;
-    if (res1.winnerId) {
-      const penText = res1.isTied ? ` (Pênaltis: ${res1.team2Pen} x ${res1.team1Pen})` : '';
-      text += `   Classificado: ${namesMap[res1.winnerId]}${penText}\n`;
-    }
-
-    text += ` Semifinal 2:\n`;
-    text += `   Ida:   ${namesMap[sf2Ida.homeId] || sf2Ida.homeId} ${sf2Ida.completed ? sf2Ida.homeScore : '-'} x ${sf2Ida.completed ? sf2Ida.awayScore : '-'} ${namesMap[sf2Ida.awayId] || sf2Ida.awayId}\n`;
-    text += `   Volta: ${namesMap[sf2Volta.homeId] || sf2Volta.homeId} ${sf2Volta.completed ? sf2Volta.homeScore : '-'} x ${sf2Volta.completed ? sf2Volta.awayScore : '-'} ${namesMap[sf2Volta.awayId] || sf2Volta.awayId}\n`;
-    if (res2.winnerId) {
-      const penText = res2.isTied ? ` (Pênaltis: ${res2.team2Pen} x ${res2.team1Pen})` : '';
-      text += `   Classificado: ${namesMap[res2.winnerId]}${penText}\n`;
-    }
-    text += `\n`;
-  }
-
-  // Third Place
-  if (state.thirdPlaceMatch) {
-    const f = state.thirdPlaceMatch;
-    const homeName = namesMap[f.homeId] || f.homeId;
-    const awayName = namesMap[f.awayId] || f.awayId;
-    text += `DISPUTA DE 3º LUGAR:\n`;
-    const score = f.completed ? `${f.homeScore} x ${f.awayScore}` : 'Pendente';
-    const penText = f.completed && f.homeScore === f.awayScore && f.homePenalties !== null && f.awayPenalties !== null
-      ? ` (Pênaltis: ${f.homePenalties} x ${f.awayPenalties})`
-      : '';
-    text += ` ${homeName} ${score} ${awayName}${penText}\n\n`;
-  }
-
-  // Final
-  if (state.finalMatch) {
-    const f = state.finalMatch;
-    const homeName = namesMap[f.homeId] || f.homeId;
-    const awayName = namesMap[f.awayId] || f.awayId;
-    text += `FINAL:\n`;
-    const score = f.completed ? `${f.homeScore} x ${f.awayScore}` : 'Pendente';
-    const penText = f.completed && f.homeScore === f.awayScore && f.homePenalties !== null && f.awayPenalties !== null
-      ? ` (Pênaltis: ${f.homePenalties} x ${f.awayPenalties})`
-      : '';
-    text += ` ${homeName} ${score} ${awayName}${penText}\n\n`;
-  }
-
-  // Champion
-  if (state.championId) {
-    text += `🏆 CAMPEÃO: ${namesMap[state.championId] || state.championId} 🏆\n`;
-  }
-
-  return text;
-}
-
 export function encodeState(state: TournamentState): string {
   try {
     const json = JSON.stringify(state);
@@ -629,140 +150,125 @@ export function decodeState(str: string): TournamentState | null {
 export interface LeaderboardEntry {
   participantId: string;
   rank: number;
-  stage: 'champion' | 'finalist' | 'third_place' | 'fourth_place' | 'semifinalist' | 'quarterfinalist' | 'groups';
+  stageLabel: string; // human-readable badge text, e.g. "Campeão", "Eliminado (Quartas de Final)"
+  tier: number; // internal ranking weight (higher = went further); exposed mainly for tests
   points: number;
   goalDifference: number;
   goalsFor: number;
 }
 
-export function calculateLeaderboard(state: TournamentState): LeaderboardEntry[] {
-  const standingsA = calculateStandings('A', state.participants, state.groupMatches);
-  const standingsB = calculateStandings('B', state.participants, state.groupMatches);
-  
-  const allStandings = [...standingsA, ...standingsB];
-  const standingsMap = new Map(allStandings.map(s => [s.participantId, s]));
-  
-  const qfWinners = new Set<string>();
-  const qfLosers = new Set<string>();
-  if (state.qfMatches && state.qfMatches.length === 4) {
-    state.qfMatches.forEach(m => {
-      const winner = getQuarterfinalWinner(m);
-      if (winner) {
-        qfWinners.add(winner);
-        qfLosers.add(winner === m.homeId ? m.awayId : m.homeId);
-      } else {
-        qfLosers.add(m.homeId);
-        qfLosers.add(m.awayId);
-      }
+export interface StageOutcome {
+  winners: string[];
+  losers: string[];
+}
+
+// Reads (doesn't generate) the winner/loser of every slot already played in a stage —
+// used by calculateLeaderboard, generateSummaryText, and the bracket/podium UI.
+export function resolveStageOutcomes(stageDef: StageDef, matches: Match[]): StageOutcome {
+  const bySlot = new Map<number, Match[]>();
+  matches
+    .filter(m => m.stage === stageDef.id)
+    .forEach(m => {
+      const list = bySlot.get(m.slot) ?? [];
+      list.push(m);
+      bySlot.set(m.slot, list);
     });
-  }
-  
-  const sfWinners = new Set<string>();
-  const sfLosers = new Set<string>();
-  if (state.sfMatches && state.sfMatches.length === 4 && state.qfMatches && state.qfMatches.length === 4) {
-    const qf1Match = state.qfMatches.find(m => m.id === 'qf1')!;
-    const qf2Match = state.qfMatches.find(m => m.id === 'qf2')!;
-    const qf3Match = state.qfMatches.find(m => m.id === 'qf3')!;
-    const qf4Match = state.qfMatches.find(m => m.id === 'qf4')!;
 
-    const w1 = getQuarterfinalWinner(qf1Match) || 'Vencedor QF1';
-    const w2 = getQuarterfinalWinner(qf2Match) || 'Vencedor QF2';
-    const w3 = getQuarterfinalWinner(qf3Match) || 'Vencedor QF3';
-    const w4 = getQuarterfinalWinner(qf4Match) || 'Vencedor QF4';
+  const winners: string[] = [];
+  const losers: string[] = [];
 
-    const sf1Ida = state.sfMatches.find(m => m.id === 'sf1_ida')!;
-    const sf1Volta = state.sfMatches.find(m => m.id === 'sf1_volta')!;
-    const sf2Ida = state.sfMatches.find(m => m.id === 'sf2_ida')!;
-    const sf2Volta = state.sfMatches.find(m => m.id === 'sf2_volta')!;
-
-    const res1 = getSemifinalResult(sf1Ida, sf1Volta, w1, w3);
-    const res2 = getSemifinalResult(sf2Ida, sf2Volta, w4, w2);
-
-    if (res1.winnerId) {
-      sfWinners.add(res1.winnerId);
-      sfLosers.add(res1.winnerId === w1 ? w3 : w1);
+  bySlot.forEach(legs => {
+    if (stageDef.legs === 2) {
+      const leg1 = legs.find(m => m.leg === 1);
+      const leg2 = legs.find(m => m.leg === 2);
+      if (!leg1 || !leg2) return;
+      const result = getTwoLegAggregateResult(leg1, leg2, leg1.homeId, leg1.awayId);
+      if (result.winnerId) {
+        winners.push(result.winnerId);
+        losers.push(result.winnerId === leg1.homeId ? leg1.awayId : leg1.homeId);
+      }
     } else {
-      sfLosers.add(w1);
-      sfLosers.add(w3);
+      const m = legs[0];
+      if (!m) return;
+      const winner = getMatchWinner(m);
+      if (winner) {
+        winners.push(winner);
+        losers.push(winner === m.homeId ? m.awayId : m.homeId);
+      }
     }
-    
-    if (res2.winnerId) {
-      sfWinners.add(res2.winnerId);
-      sfLosers.add(res2.winnerId === w4 ? w2 : w4);
-    } else {
-      sfLosers.add(w2);
-      sfLosers.add(w4);
+  });
+
+  return { winners, losers };
+}
+
+export function calculateLeaderboard(state: TournamentState): LeaderboardEntry[] {
+  const config = state.config;
+  const groups: ('A' | 'B')[] = config.groupCount === 2 ? ['A', 'B'] : config.groupCount === 1 ? ['A'] : [];
+  const standingsMap = new Map<string, Standing>();
+  groups.forEach(g => {
+    calculateStandings(g, state.participants, state.groupMatches).forEach(s => standingsMap.set(s.participantId, s));
+  });
+
+  const knockoutStages = getVisibleStages(config).filter(s => s.id !== 'third_place');
+  const finalStage = knockoutStages.find(s => s.id === 'final') ?? null;
+  const nonFinalStages = knockoutStages.filter(s => s.id !== 'final');
+  const thirdPlaceStage = config.stages.find(s => s.id === 'third_place') ?? null;
+
+  const STEP = 10;
+  const tierInfo = new Map<string, { tier: number; label: string }>();
+  const setIfHigher = (id: string, entry: { tier: number; label: string }) => {
+    const existing = tierInfo.get(id);
+    if (!existing || entry.tier > existing.tier) {
+      tierInfo.set(id, entry);
+    }
+  };
+
+  nonFinalStages.forEach(stageDef => {
+    const { winners, losers } = resolveStageOutcomes(stageDef, state.knockoutMatches);
+    const base = (stageDef.order + 1) * STEP;
+    winners.forEach(id => setIfHigher(id, { tier: base + 1, label: `Avançou (${stageDef.label})` }));
+    losers.forEach(id => setIfHigher(id, { tier: base, label: `Eliminado (${stageDef.label})` }));
+  });
+
+  if (finalStage) {
+    const { winners, losers } = resolveStageOutcomes(finalStage, state.knockoutMatches);
+    const base = (finalStage.order + 1) * STEP;
+    winners.forEach(id => setIfHigher(id, { tier: base + STEP, label: 'Campeão' }));
+    losers.forEach(id => setIfHigher(id, { tier: base, label: 'Vice-campeão' }));
+
+    if (winners.length === 0) {
+      state.knockoutMatches
+        .filter(m => m.stage === 'final')
+        .forEach(m => {
+          setIfHigher(m.homeId, { tier: base, label: 'Finalista' });
+          setIfHigher(m.awayId, { tier: base, label: 'Finalista' });
+        });
     }
   }
 
-  const championId = state.championId;
-  let runnerUpId: string | null = null;
-  if (state.finalMatch && state.finalMatch.completed) {
-    if (championId) {
-      runnerUpId = championId === state.finalMatch.homeId ? state.finalMatch.awayId : state.finalMatch.homeId;
-    }
+  if (thirdPlaceStage && finalStage) {
+    const { winners, losers } = resolveStageOutcomes(thirdPlaceStage, state.knockoutMatches);
+    const base = (finalStage.order + 1) * STEP - STEP / 2;
+    winners.forEach(id => setIfHigher(id, { tier: base + 1, label: '3º Lugar' }));
+    losers.forEach(id => setIfHigher(id, { tier: base, label: '4º Lugar' }));
   }
 
-  // 3rd place winner / loser calculation
-  const thirdPlaceWinner = getThirdPlaceWinner(state.thirdPlaceMatch);
-  let thirdPlaceLoser: string | null = null;
-  if (state.thirdPlaceMatch && state.thirdPlaceMatch.completed && thirdPlaceWinner) {
-    thirdPlaceLoser = thirdPlaceWinner === state.thirdPlaceMatch.homeId ? state.thirdPlaceMatch.awayId : state.thirdPlaceMatch.homeId;
-  }
-  
   const entries: LeaderboardEntry[] = state.participants.map(p => {
-    const s = standingsMap.get(p.id) || { points: 0, goalDifference: 0, goalsFor: 0 };
-    let stage: LeaderboardEntry['stage'] = 'groups';
-    
-    if (championId && p.id === championId) {
-      stage = 'champion';
-    } else if (runnerUpId && p.id === runnerUpId) {
-      stage = 'finalist';
-    } else if (state.finalMatch && (p.id === state.finalMatch.homeId || p.id === state.finalMatch.awayId)) {
-      stage = 'finalist';
-    } else if (thirdPlaceWinner && p.id === thirdPlaceWinner) {
-      stage = 'third_place';
-    } else if (thirdPlaceLoser && p.id === thirdPlaceLoser) {
-      stage = 'fourth_place';
-    } else if (state.thirdPlaceMatch && (p.id === state.thirdPlaceMatch.homeId || p.id === state.thirdPlaceMatch.awayId)) {
-      stage = 'semifinalist';
-    } else if (sfLosers.has(p.id)) {
-      stage = 'semifinalist';
-    } else if (sfWinners.has(p.id)) {
-      stage = 'semifinalist';
-    } else if (qfLosers.has(p.id)) {
-      stage = 'quarterfinalist';
-    } else if (qfWinners.has(p.id)) {
-      stage = 'quarterfinalist';
-    } else {
-      stage = 'groups';
-    }
-    
+    const s = standingsMap.get(p.id);
+    const info = tierInfo.get(p.id) ?? { tier: 0, label: 'Fase de Grupos' };
     return {
       participantId: p.id,
-      rank: 10,
-      stage,
-      points: s.points,
-      goalDifference: s.goalDifference,
-      goalsFor: s.goalsFor,
+      rank: 0,
+      stageLabel: info.label,
+      tier: info.tier,
+      points: s?.points ?? 0,
+      goalDifference: s?.goalDifference ?? 0,
+      goalsFor: s?.goalsFor ?? 0,
     };
   });
 
-  const stageWeights = {
-    champion: 7,
-    finalist: 6,
-    third_place: 5,
-    fourth_place: 4,
-    semifinalist: 3,
-    quarterfinalist: 2,
-    groups: 1,
-  };
-
   entries.sort((a, b) => {
-    const weightA = stageWeights[a.stage];
-    const weightB = stageWeights[b.stage];
-    if (weightB !== weightA) return weightB - weightA;
-    
+    if (b.tier !== a.tier) return b.tier - a.tier;
     if (b.points !== a.points) return b.points - a.points;
     if (b.goalDifference !== a.goalDifference) return b.goalDifference - a.goalDifference;
     if (b.goalsFor !== a.goalsFor) return b.goalsFor - a.goalsFor;
@@ -774,4 +280,725 @@ export function calculateLeaderboard(state: TournamentState): LeaderboardEntry[]
   });
 
   return entries;
+}
+
+export function generateSummaryText(
+  state: TournamentState,
+  namesMap: Record<string, string>
+): string {
+  const config = state.config;
+  const groups: ('A' | 'B')[] = config.groupCount === 2 ? ['A', 'B'] : config.groupCount === 1 ? ['A'] : [];
+
+  let text = `=== CAMPEONATO DE FIFA - RESUMO DO TORNEIO ===\n\n`;
+
+  text += `PARTICIPANTES:\n`;
+  if (groups.length > 0) {
+    groups.forEach(g => {
+      text += `Grupo ${g}:\n`;
+      state.participants.filter(p => p.groupId === g).forEach(p => {
+        text += ` - ${p.name}${p.team ? ` (${p.team})` : ''}\n`;
+      });
+    });
+  } else {
+    [...state.participants].sort((a, b) => a.seed - b.seed).forEach(p => {
+      text += ` - ${p.name}${p.team ? ` (${p.team})` : ''}\n`;
+    });
+  }
+  text += `\n`;
+
+  if (groups.length > 0) {
+    const renderStandingRow = (s: Standing, rank: number) => {
+      const name = namesMap[s.participantId] || '';
+      return `${rank}º ${name.padEnd(20)} | PTS: ${s.points} | J: ${s.games} | V: ${s.wins} | E: ${s.draws} | D: ${s.losses} | GP: ${s.goalsFor} | GC: ${s.goalsAgainst} | SG: ${s.goalDifference}\n`;
+    };
+
+    text += `CLASSIFICAÇÃO:\n`;
+    groups.forEach(g => {
+      text += `Grupo ${g}:\n`;
+      calculateStandings(g, state.participants, state.groupMatches).forEach((s, i) => {
+        text += renderStandingRow(s, i + 1);
+      });
+    });
+    text += `\n`;
+
+    text += `RESULTADOS DA FASE DE GRUPOS:\n`;
+    const rounds = Array.from(new Set(state.groupMatches.map(m => m.round))).sort((a, b) => a - b);
+    rounds.forEach(r => {
+      text += `Rodada ${r}:\n`;
+      groups.forEach(g => {
+        text += ` Grupo ${g}:\n`;
+        state.groupMatches.filter(m => m.groupId === g && m.round === r).forEach(m => {
+          const home = namesMap[m.homeId] || '';
+          const away = namesMap[m.awayId] || '';
+          const score = m.completed ? `${m.homeScore} x ${m.awayScore}` : 'Pendente';
+          text += `   ${home} ${score} ${away}\n`;
+        });
+      });
+    });
+    text += `\n`;
+  }
+
+  getVisibleStages(config).forEach(stageDef => {
+    const stageMatches = state.knockoutMatches.filter(m => m.stage === stageDef.id);
+    if (stageMatches.length === 0) return;
+
+    text += `${stageDef.label.toUpperCase()}:\n`;
+
+    const bySlot = new Map<number, Match[]>();
+    stageMatches.forEach(m => {
+      const list = bySlot.get(m.slot) ?? [];
+      list.push(m);
+      bySlot.set(m.slot, list);
+    });
+
+    Array.from(bySlot.keys()).sort((a, b) => a - b).forEach(slot => {
+      const legs = (bySlot.get(slot) ?? []).sort((a, b) => a.leg - b.leg);
+      legs.forEach(m => {
+        const home = namesMap[m.homeId] || '';
+        const away = namesMap[m.awayId] || '';
+        const score = m.completed ? `${m.homeScore} x ${m.awayScore}` : 'Pendente';
+        const legLabel = stageDef.legs === 2 ? (m.leg === 1 ? ' (Ida)' : ' (Volta)') : '';
+        text += `   Jogo ${slot}${legLabel}: ${home} ${score} ${away}\n`;
+      });
+
+      if (stageDef.legs === 2 && legs.length === 2) {
+        const result = getTwoLegAggregateResult(legs[0], legs[1], legs[0].homeId, legs[0].awayId);
+        if (result.winnerId) {
+          const penText = result.isTied ? ` (Pênaltis: ${result.team2Pen} x ${result.team1Pen})` : '';
+          text += `   Classificado: ${namesMap[result.winnerId] || result.winnerId}${penText}\n`;
+        }
+      } else {
+        const m = legs[0];
+        if (m?.completed) {
+          const winner = getMatchWinner(m);
+          const penText = m.homeScore === m.awayScore && m.homePenalties != null && m.awayPenalties != null
+            ? ` (Pênaltis: ${m.homePenalties} x ${m.awayPenalties})`
+            : '';
+          if (winner) {
+            text += `   Vencedor: ${namesMap[winner] || winner}${penText}\n`;
+          }
+        }
+      }
+    });
+    text += `\n`;
+  });
+
+  if (state.championId) {
+    text += `🏆 CAMPEÃO: ${namesMap[state.championId] || state.championId} 🏆\n`;
+  }
+
+  return text;
+}
+
+// =====================================================================================
+// Generic tournament engine (additive) — supports arbitrary participant counts, ≤2
+// groups, single/two-leg knockout stages and a preliminary (play-in) round when the
+// entrant count doesn't fill a clean power-of-two bracket. See tournamentHelpers.test.ts
+// for worked examples of every function below.
+// =====================================================================================
+
+// ---------- Bracket-size math ----------
+
+// Avoids Math.log2/Math.floor, which can misround exact powers of two (e.g. log2(8)
+// sometimes evaluates to 2.9999999999996 due to floating point).
+export function previousPowerOfTwo(n: number): number {
+  let p = 1;
+  while (p * 2 <= n) {
+    p *= 2;
+  }
+  return p;
+}
+
+export interface BracketPlan {
+  bracketSize: number;
+  prelimMatches: number;
+}
+
+export function computeBracketPlan(n: number): BracketPlan {
+  const bracketSize = previousPowerOfTwo(n);
+  return { bracketSize, prelimMatches: n - bracketSize };
+}
+
+// Standard recursive tournament seeding order (e.g. size 8 -> [1,8,4,5,2,7,3,6]), so
+// round-1 pairs are (seed1,seed8), (seed4,seed5), (seed2,seed7), (seed3,seed6).
+export function standardSeedOrder(size: number): number[] {
+  if (size <= 1) return [1];
+  const half = standardSeedOrder(size / 2);
+  const result: number[] = [];
+  half.forEach(s => {
+    result.push(s, size + 1 - s);
+  });
+  return result;
+}
+
+const STAGE_LADDER_BY_BRACKET_SIZE: Record<number, { id: StageId; label: string }[]> = {
+  2: [{ id: 'final', label: 'Final' }],
+  4: [
+    { id: 'semifinals', label: 'Semifinal' },
+    { id: 'final', label: 'Final' },
+  ],
+  8: [
+    { id: 'quarterfinals', label: 'Quartas de Final' },
+    { id: 'semifinals', label: 'Semifinal' },
+    { id: 'final', label: 'Final' },
+  ],
+  16: [
+    { id: 'round_of_16', label: 'Oitavas de Final' },
+    { id: 'quarterfinals', label: 'Quartas de Final' },
+    { id: 'semifinals', label: 'Semifinal' },
+    { id: 'final', label: 'Final' },
+  ],
+};
+
+// Which knockout stages are reachable for a given number of entrants, prefixed with a
+// 'prelim' stage when the entrant count doesn't fill a clean power-of-two bracket.
+export function buildStageLadder(entrantCount: number): StageDef[] {
+  const { bracketSize, prelimMatches } = computeBracketPlan(entrantCount);
+  const base = STAGE_LADDER_BY_BRACKET_SIZE[bracketSize];
+  if (!base) {
+    throw new Error(`Bracket size ${bracketSize} is not supported (entrantCount=${entrantCount})`);
+  }
+
+  const stages: StageDef[] = [];
+  let order = 0;
+
+  if (prelimMatches > 0) {
+    stages.push({ id: 'prelim', label: 'Rodada Preliminar', order: order++, slotCount: prelimMatches, legs: 1 });
+  }
+
+  base.forEach((s, idx) => {
+    stages.push({
+      id: s.id,
+      label: s.label,
+      order: order++,
+      slotCount: bracketSize / Math.pow(2, idx + 1),
+      legs: 1,
+    });
+  });
+
+  return stages;
+}
+
+// ---------- Group round-robin fixture (circle method) ----------
+
+export interface RoundRobinFixture {
+  matches: { round: number; homeIdx: number; awayIdx: number }[];
+  byeByRound: Record<number, number>; // round -> 1-based index of the idle player (odd group sizes only)
+  rounds: number;
+}
+
+// Odd group sizes get one extra virtual "bye" seat so every player still gets a game
+// every round except one; even group sizes need no byes. Both cases fall out of the
+// same rotation naturally once the bye seat is added.
+export function generateRoundRobinFixture(groupSize: number): RoundRobinFixture {
+  if (groupSize < 2) {
+    return { matches: [], byeByRound: {}, rounds: 0 };
+  }
+
+  const isOdd = groupSize % 2 !== 0;
+  const seats = isOdd ? groupSize + 1 : groupSize;
+  const BYE = isOdd ? seats : null;
+  const rounds = seats - 1;
+  const half = seats / 2;
+
+  let arr = Array.from({ length: seats }, (_, i) => i + 1);
+  const matches: { round: number; homeIdx: number; awayIdx: number }[] = [];
+  const byeByRound: Record<number, number> = {};
+
+  for (let r = 1; r <= rounds; r++) {
+    for (let i = 0; i < half; i++) {
+      const a = arr[i];
+      const b = arr[seats - 1 - i];
+      if (BYE !== null && (a === BYE || b === BYE)) {
+        byeByRound[r] = a === BYE ? b : a;
+        continue;
+      }
+      const home = r % 2 === 1 ? a : b;
+      const away = r % 2 === 1 ? b : a;
+      matches.push({ round: r, homeIdx: home, awayIdx: away });
+    }
+
+    const fixedFirst = arr[0];
+    const rest = arr.slice(1);
+    rest.unshift(rest.pop()!);
+    arr = [fixedFirst, ...rest];
+  }
+
+  return { matches, byeByRound, rounds };
+}
+
+export function generateGroupStageMatches(groupId: 'A' | 'B', participantIds: string[]): Match[] {
+  const { matches } = generateRoundRobinFixture(participantIds.length);
+  const countByRound: Record<number, number> = {};
+  return matches.map((f) => {
+    countByRound[f.round] = (countByRound[f.round] ?? 0) + 1;
+    return {
+      id: `group_${groupId.toLowerCase()}_r${f.round}_m${countByRound[f.round]}`,
+      stage: 'groups',
+      groupId,
+      round: f.round,
+      slot: countByRound[f.round],
+      leg: 1,
+      homeId: participantIds[f.homeIdx - 1],
+      awayId: participantIds[f.awayIdx - 1],
+      completed: false,
+    };
+  });
+}
+
+// ---------- Cross-group qualifier seeding (≤2 groups) ----------
+
+export interface QualifierSeed {
+  group: 'A' | 'B';
+  rank: number; // 1-based, 1 = best in group
+}
+
+// Interleaving group qualifiers by rank (A1,B1,A2,B2,...) and then laying out the
+// bracket with standardSeedOrder reproduces the classic "1st vs 4th of the other
+// group, 2nd vs 3rd of the other group" crossover for any qualifier count, not just 4.
+export function generateCrossoverPairings(qualifiersPerGroup: number): QualifierSeed[] {
+  const seeds: QualifierSeed[] = [];
+  for (let rank = 1; rank <= qualifiersPerGroup; rank++) {
+    seeds.push({ group: 'A', rank });
+    seeds.push({ group: 'B', rank });
+  }
+  return seeds;
+}
+
+// ---------- Single-match / two-leg winner resolution (stage-agnostic) ----------
+
+export function getMatchWinner(match: Match): string | null {
+  if (!match.completed) return null;
+  const hs = match.homeScore ?? 0;
+  const as = match.awayScore ?? 0;
+  if (hs > as) return match.homeId;
+  if (as > hs) return match.awayId;
+
+  const hp = match.homePenalties;
+  const ap = match.awayPenalties;
+  if (hp !== null && hp !== undefined && ap !== null && ap !== undefined) {
+    if (hp > ap) return match.homeId;
+    if (ap > hp) return match.awayId;
+  }
+  return null;
+}
+
+export interface TwoLegResult {
+  winnerId: string | null;
+  team1Id: string;
+  team2Id: string;
+  team1Agg: number;
+  team2Agg: number;
+  isTied: boolean;
+  team1Pen?: number | null;
+  team2Pen?: number | null;
+}
+
+// team1 is home in leg1 (ida) and away in leg2 (volta); team2 the reverse.
+export function getTwoLegAggregateResult(
+  leg1: Match,
+  leg2: Match,
+  team1Id: string,
+  team2Id: string
+): TwoLegResult {
+  const result: TwoLegResult = {
+    winnerId: null,
+    team1Id,
+    team2Id,
+    team1Agg: 0,
+    team2Agg: 0,
+    isTied: false,
+  };
+
+  if (!leg1 || !leg2 || !leg1.completed || !leg2.completed) {
+    return result;
+  }
+
+  const h1 = leg1.homeScore ?? 0;
+  const a1 = leg1.awayScore ?? 0;
+  const h2 = leg2.homeScore ?? 0;
+  const a2 = leg2.awayScore ?? 0;
+
+  const team1Agg = h1 + a2;
+  const team2Agg = a1 + h2;
+
+  result.team1Agg = team1Agg;
+  result.team2Agg = team2Agg;
+
+  if (team1Agg > team2Agg) {
+    result.winnerId = team1Id;
+  } else if (team2Agg > team1Agg) {
+    result.winnerId = team2Id;
+  } else {
+    result.isTied = true;
+    const team1Pen = leg2.awayPenalties;
+    const team2Pen = leg2.homePenalties;
+    result.team1Pen = team1Pen;
+    result.team2Pen = team2Pen;
+
+    if (team1Pen !== undefined && team1Pen !== null && team2Pen !== undefined && team2Pen !== null) {
+      if (team1Pen > team2Pen) {
+        result.winnerId = team1Id;
+      } else if (team2Pen > team1Pen) {
+        result.winnerId = team2Id;
+      }
+    }
+  }
+
+  return result;
+}
+
+export function buildMatchId(stage: StageId, slot: number, leg: 1 | 2 = 1): string {
+  return `${stage}_slot${slot}_leg${leg}`;
+}
+
+// ---------- Generic knockout advancement ----------
+
+type CarryFn = (id: string, stage: StageId, slot: number, leg: 1 | 2, homeId: string, awayId: string) => Match;
+
+function resolveSlotMatches(
+  stageDef: StageDef,
+  slot: number,
+  home: string | null,
+  away: string | null,
+  carry: CarryFn
+): { matches: Match[]; winner: string | null; loser: string | null } {
+  if (!home || !away) return { matches: [], winner: null, loser: null };
+
+  if (stageDef.legs === 2) {
+    const leg1 = carry(buildMatchId(stageDef.id, slot, 1), stageDef.id, slot, 1, home, away);
+    const leg2 = carry(buildMatchId(stageDef.id, slot, 2), stageDef.id, slot, 2, away, home);
+    const aggregate = getTwoLegAggregateResult(leg1, leg2, home, away);
+    const winner = aggregate.winnerId;
+    const loser = winner ? (winner === home ? away : home) : null;
+    return { matches: [leg1, leg2], winner, loser };
+  }
+
+  const match = carry(buildMatchId(stageDef.id, slot, 1), stageDef.id, slot, 1, home, away);
+  const winner = getMatchWinner(match);
+  const loser = winner ? (winner === home ? away : home) : null;
+  return { matches: [match], winner, loser };
+}
+
+// Resolves the ordered list of participant ids feeding the knockout stage: the seeded
+// participant list when there's no group stage, or the crossover-seeded group
+// qualifiers once the group stage has finished (empty array if not ready yet).
+export function resolveKnockoutSeedPool(
+  config: ChampionshipConfig,
+  participants: Participant[],
+  groupMatches: Match[],
+  standingsByGroup: Partial<Record<'A' | 'B', Standing[]>>
+): string[] {
+  if (!config.hasGroupStage) {
+    return [...participants].sort((a, b) => (a.seed ?? 0) - (b.seed ?? 0)).map(p => p.id);
+  }
+
+  if (!checkGroupStageComplete(groupMatches)) return [];
+
+  if (config.groupCount === 1) {
+    return (standingsByGroup.A ?? []).slice(0, config.qualifiersPerGroup).map(s => s.participantId);
+  }
+
+  const seeds = generateCrossoverPairings(config.qualifiersPerGroup);
+  return seeds
+    .map(seed => (standingsByGroup[seed.group] ?? [])[seed.rank - 1]?.participantId)
+    .filter((id): id is string => !!id);
+}
+
+// The single engine that (re)generates every knockout match from a seeded entrant pool.
+// Only the first real stage (prelim, or the first bracket round if there's no prelim)
+// needs seeding-aware pairing — every stage after that just pairs adjacent slots
+// (2j-1, 2j) of the previous stage, which is the standard bracket-advancement rule.
+export function advanceKnockoutStages(
+  config: ChampionshipConfig,
+  seededPoolIds: string[],
+  prevKnockoutMatches: Match[]
+): Match[] {
+  const stages = config.stages.filter(s => s.id !== 'third_place');
+  const thirdPlaceStage = config.stages.find(s => s.id === 'third_place') ?? null;
+  if (stages.length === 0 || seededPoolIds.length === 0) return [];
+
+  // Keyed by (stage, leg, homeId, awayId) rather than match id — slot numbers can shift
+  // between recomputations (e.g. a legacy-migrated bracket renumbered by the generic
+  // seeding scheme), but the same two participants meeting again should still keep
+  // their score.
+  const prevByPairing = new Map<string, Match>();
+  prevKnockoutMatches.forEach(m => {
+    prevByPairing.set(`${m.stage}|${m.leg}|${m.homeId}|${m.awayId}`, m);
+  });
+  const carry: CarryFn = (id, stage, slot, leg, homeId, awayId) => {
+    const prev = prevByPairing.get(`${stage}|${leg}|${homeId}|${awayId}`);
+    return {
+      id,
+      stage,
+      round: 1,
+      slot,
+      leg,
+      homeId,
+      awayId,
+      homeScore: prev?.homeScore ?? null,
+      awayScore: prev?.awayScore ?? null,
+      homePenalties: prev?.homePenalties ?? null,
+      awayPenalties: prev?.awayPenalties ?? null,
+      completed: prev?.completed ?? false,
+    };
+  };
+
+  const result: Match[] = [];
+  let pool: (string | null)[] = seededPoolIds;
+  let firstStage = true;
+  let loserPoolForThirdPlace: (string | null)[] | null = null;
+
+  for (let s = 0; s < stages.length; s++) {
+    const stageDef = stages[s];
+    const winners: (string | null)[] = [];
+    const losers: (string | null)[] = [];
+
+    if (firstStage && stageDef.id === 'prelim') {
+      const n = pool.length;
+      const { bracketSize, prelimMatches } = computeBracketPlan(n);
+      const byedCount = bracketSize - prelimMatches;
+      const prelimPool = pool.slice(byedCount);
+      const advancing: (string | null)[] = pool.slice(0, byedCount);
+
+      for (let i = 0; i < prelimMatches; i++) {
+        const home = prelimPool[i] ?? null;
+        const away = prelimPool[prelimPool.length - 1 - i] ?? null;
+        const { matches, winner } = resolveSlotMatches(stageDef, i + 1, home, away, carry);
+        result.push(...matches);
+        advancing.push(winner);
+      }
+
+      pool = advancing;
+      continue; // next iteration still uses seeding-aware pairing (firstStage stays true)
+    }
+
+    if (firstStage) {
+      const n = pool.length;
+      const { bracketSize } = computeBracketPlan(n);
+      const order = standardSeedOrder(bracketSize);
+
+      for (let j = 0; j < stageDef.slotCount; j++) {
+        const seedA = order[j * 2];
+        const seedB = order[j * 2 + 1];
+        const home = pool[seedA - 1] ?? null;
+        const away = pool[seedB - 1] ?? null;
+        const { matches, winner, loser } = resolveSlotMatches(stageDef, j + 1, home, away, carry);
+        result.push(...matches);
+        winners.push(winner);
+        losers.push(loser);
+      }
+      firstStage = false;
+    } else {
+      for (let j = 0; j < stageDef.slotCount; j++) {
+        const home = pool[j * 2] ?? null;
+        const away = pool[j * 2 + 1] ?? null;
+        const { matches, winner, loser } = resolveSlotMatches(stageDef, j + 1, home, away, carry);
+        result.push(...matches);
+        winners.push(winner);
+        losers.push(loser);
+      }
+    }
+
+    if (thirdPlaceStage && stages[s + 1]?.id === 'final') {
+      loserPoolForThirdPlace = losers;
+    }
+
+    if (!winners.every(w => w !== null)) {
+      pool = [];
+      break;
+    }
+    pool = winners;
+  }
+
+  if (thirdPlaceStage) {
+    const home = loserPoolForThirdPlace?.[0] ?? null;
+    const away = loserPoolForThirdPlace?.[1] ?? null;
+    const { matches } = resolveSlotMatches(thirdPlaceStage, 1, home, away, carry);
+    result.push(...matches);
+  }
+
+  return result;
+}
+
+// ---------- Wizard-facing generators ----------
+
+export interface WizardParticipantInput {
+  name: string;
+  team?: string;
+}
+
+export interface WizardFormatInput {
+  hasGroupStage: boolean;
+  groupCount: 0 | 1 | 2;
+  qualifiersPerGroup: number;
+  legs: 1 | 2; // global toggle applied to every generated stage except prelim/third_place
+  hasThirdPlace: boolean;
+}
+
+export function generateParticipants(entries: WizardParticipantInput[], groupCount: 0 | 1 | 2): Participant[] {
+  return entries.map((e, idx) => {
+    const seed = idx + 1;
+    let groupId: 'A' | 'B' | null = null;
+    if (groupCount === 1) groupId = 'A';
+    else if (groupCount === 2) groupId = idx % 2 === 0 ? 'A' : 'B';
+    return { id: `p${seed}`, name: e.name, team: e.team, groupId, seed };
+  });
+}
+
+export function generateChampionshipConfig(
+  participantCount: number,
+  format: WizardFormatInput
+): ChampionshipConfig {
+  const effectiveGroupCount = format.hasGroupStage ? format.groupCount : 0;
+  const knockoutEntrantCount = format.hasGroupStage
+    ? format.qualifiersPerGroup * effectiveGroupCount
+    : participantCount;
+
+  const ladder = buildStageLadder(knockoutEntrantCount);
+  const stages: StageDef[] = ladder.map(s => (s.id === 'prelim' ? s : { ...s, legs: format.legs }));
+
+  if (format.hasThirdPlace) {
+    const finalStage = stages.find(s => s.id === 'final');
+    const preFinalStage = stages[stages.length - 2];
+    if (finalStage && preFinalStage && preFinalStage.slotCount === 2) {
+      stages.push({
+        id: 'third_place',
+        label: 'Disputa de 3º Lugar',
+        order: finalStage.order,
+        slotCount: 1,
+        legs: 1,
+      });
+    }
+  }
+
+  return {
+    version: 1,
+    participantCount,
+    hasGroupStage: format.hasGroupStage,
+    groupCount: effectiveGroupCount,
+    qualifiersPerGroup: format.hasGroupStage ? format.qualifiersPerGroup : 0,
+    stages,
+  };
+}
+
+// Generates the initial knockoutMatches when there's no group stage (the knockout pool
+// is known immediately). When there IS a group stage, knockout matches only appear once
+// the group stage completes, so this correctly returns [] until then.
+export function generateKnockoutSkeleton(config: ChampionshipConfig, participants: Participant[]): Match[] {
+  const pool = resolveKnockoutSeedPool(config, participants, [], {});
+  return advanceKnockoutStages(config, pool, []);
+}
+
+export function generateGroupMatchesForConfig(config: ChampionshipConfig, participants: Participant[]): Match[] {
+  if (!config.hasGroupStage) return [];
+  const groups: ('A' | 'B')[] = config.groupCount === 1 ? ['A'] : ['A', 'B'];
+  return groups.flatMap(g => {
+    const ids = participants
+      .filter(p => p.groupId === g)
+      .sort((a, b) => a.seed - b.seed)
+      .map(p => p.id);
+    return generateGroupStageMatches(g, ids);
+  });
+}
+
+// The single entry point the setup wizard uses to turn a confirmed config + participant
+// list into a fully playable TournamentState (group fixtures generated, first knockout
+// stage generated when there's no group stage to wait on).
+export function buildInitialTournamentState(config: ChampionshipConfig, participants: Participant[]): TournamentState {
+  return {
+    config,
+    participants,
+    groupMatches: generateGroupMatchesForConfig(config, participants),
+    knockoutMatches: generateKnockoutSkeleton(config, participants),
+    championId: null,
+  };
+}
+
+export function getVisibleStages(config: ChampionshipConfig): StageDef[] {
+  return [...config.stages].sort((a, b) => a.order - b.order);
+}
+
+// ---------- Legacy-state migration ----------
+
+// Loose shape of a pre-wizard TournamentState JSON blob (the fixed 4-array bracket
+// model this app used before the generic engine existed).
+interface LegacyTournamentState {
+  config?: ChampionshipConfig;
+  participants?: (Partial<Participant> & { id: string; name: string; groupId: 'A' | 'B' | null })[];
+  groupMatches?: Match[];
+  qfMatches?: Match[];
+  sfMatches?: Match[];
+  finalMatch?: Match | null;
+  thirdPlaceMatch?: Match | null;
+  championId?: string | null;
+}
+
+// Detects the pre-wizard TournamentState shape (no config.version) and maps it onto the
+// new generic model, preserving every score/penalty/completed flag verbatim. Idempotent:
+// input that's already in the new shape is returned unchanged. Caller is expected to
+// have already confirmed a tournament exists (i.e. raw is not null/undefined).
+export function migrateLegacyState(raw: LegacyTournamentState): TournamentState {
+  if (raw.config?.version === 1) {
+    return raw as TournamentState;
+  }
+  const state = raw;
+
+  const participants: Participant[] = (state.participants ?? []).map((p, idx) => ({
+    id: p.id,
+    name: p.name,
+    team: p.team,
+    groupId: p.groupId,
+    seed: p.seed ?? idx + 1,
+  }));
+
+  const stages: StageDef[] = [
+    { id: 'quarterfinals', label: 'Quartas de Final', order: 0, slotCount: 4, legs: 1 },
+    { id: 'semifinals', label: 'Semifinal', order: 1, slotCount: 2, legs: 2 },
+    { id: 'final', label: 'Final', order: 2, slotCount: 1, legs: 1 },
+    { id: 'third_place', label: 'Disputa de 3º Lugar', order: 2, slotCount: 1, legs: 1 },
+  ];
+
+  const config: ChampionshipConfig = {
+    version: 1,
+    participantCount: participants.length,
+    hasGroupStage: true,
+    groupCount: 2,
+    qualifiersPerGroup: 4,
+    stages,
+  };
+
+  const knockoutMatches: Match[] = [];
+
+  (state.qfMatches ?? []).forEach((m, idx) => {
+    knockoutMatches.push({ ...m, id: buildMatchId('quarterfinals', idx + 1, 1), stage: 'quarterfinals', slot: idx + 1, leg: 1 });
+  });
+
+  const sfSlotByLegacyId: Record<string, { slot: number; leg: 1 | 2 }> = {
+    sf1_ida: { slot: 1, leg: 1 },
+    sf1_volta: { slot: 1, leg: 2 },
+    sf2_ida: { slot: 2, leg: 1 },
+    sf2_volta: { slot: 2, leg: 2 },
+  };
+  (state.sfMatches ?? []).forEach((m) => {
+    const mapping = sfSlotByLegacyId[m.id];
+    if (!mapping) return;
+    knockoutMatches.push({ ...m, id: buildMatchId('semifinals', mapping.slot, mapping.leg), stage: 'semifinals', slot: mapping.slot, leg: mapping.leg });
+  });
+
+  if (state.finalMatch) {
+    knockoutMatches.push({ ...state.finalMatch, id: buildMatchId('final', 1, 1), stage: 'final', slot: 1, leg: 1 });
+  }
+
+  if (state.thirdPlaceMatch) {
+    knockoutMatches.push({ ...state.thirdPlaceMatch, id: buildMatchId('third_place', 1, 1), stage: 'third_place', slot: 1, leg: 1 });
+  }
+
+  return {
+    config,
+    participants,
+    groupMatches: state.groupMatches ?? [],
+    knockoutMatches,
+    championId: state.championId ?? null,
+  };
 }

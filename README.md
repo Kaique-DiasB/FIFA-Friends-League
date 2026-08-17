@@ -12,10 +12,11 @@ Foi criado pra um campeonato de FIFA num dia típico: bebendo com os amigos e jo
 
 ### O que o app faz
 
-- **10 jogadores** em **2 grupos** (A e B, 5 cada)
-- Fase de grupos com rodadas e bye
+- **Wizard de configuração inicial**: de 2 a 24 jogadores, com ou sem times, formato "rápido" ou "completo" (ou personalizado)
+- Fase de grupos opcional (1 ou 2 grupos), com rodadas e bye gerados automaticamente pra qualquer tamanho de grupo
 - Classificação automática (pontos, saldo, etc.)
-- Quartas, semis (ida e volta), 3º lugar e final
+- Mata-mata gerado a partir da quantidade de jogadores — oitavas/quartas/semis/final conforme o caso, com rodada preliminar automática quando o número não fecha uma chave redonda
+- Jogo único ou ida e volta no mata-mata, e disputa de 3º lugar opcional
 - Placar com pênaltis quando precisar
 - Persistência em **SQLite** (`tournament.db`)
 - Página de classificação em `/classificacao` (boa pra TV / share)
@@ -31,26 +32,28 @@ npm run dev
 
 2. Abra [http://localhost:3000](http://localhost:3000).
 
-3. No dia do campeonato:
-   - Aba **Participantes** → troque os nomes padrão pelos nomes reais
-   - Aba **Grupos** → vá lançando os placares das partidas
-   - Aba **Classificação** → veja quem avança
-   - Quando a fase de grupos fechar, o app libera as **quartas**
-   - Siga **semis → 3º lugar → final** até sair o campeão
-   - Use **Reset** se quiser recomeçar do zero
+3. Na primeira vez, o app abre um **wizard**: cadastre os participantes (e times, se quiser), escolha o formato do campeonato e confirme — a fase de grupos e o mata-mata são gerados automaticamente.
 
-4. Quer só mostrar a tabela/chave pra galera? Abra `/classificacao`.
+4. No dia do campeonato:
+   - Aba **Participantes** → ajuste nomes e times a qualquer momento
+   - Abas de fase/rodada → vá lançando os placares das partidas
+   - Cada fase do mata-mata é liberada assim que a anterior fecha
+   - Use **Reiniciar** se quiser apagar tudo e configurar um campeonato novo pelo wizard
+
+5. Quer só mostrar a tabela/chave pra galera? Abra `/classificacao`.
 
 ### Como editar / contribuir
 
 | O quê | Onde |
 | --- | --- |
-| Nomes padrão, fixtures, regras de classificação | `src/utils/tournamentHelpers.ts` |
-| Tipos (`Participant`, `Match`, estado do torneio) | `src/types/tournament.ts` |
+| Motor do torneio (algoritmos de chave, fixtures, regras de classificação) | `src/utils/tournamentHelpers.ts` |
+| Tipos (`Participant`, `Match`, `ChampionshipConfig`, estado do torneio) | `src/types/tournament.ts` |
+| Wizard de criação do campeonato | `src/app/onboarding/`, `src/components/onboarding/` |
 | Tela principal e abas | `src/app/page.tsx` |
 | UI dos jogos, bracket, tabelas | `src/components/` |
 | API + SQLite | `src/app/api/tournament/`, `src/utils/db.ts` |
 | Página de classificação | `src/app/classificacao/page.tsx` |
+| Testes do motor do torneio | `src/utils/tournamentHelpers.test.ts` |
 
 
 > `tournament.db` é local e está no `.gitignore`. Cada máquina gera o próprio banco ao rodar.
@@ -63,6 +66,7 @@ npm run dev
 | `npm run build` | Build de produção |
 | `npm start` | Sobe o build |
 | `npm run lint` | ESLint |
+| `npm test` | Testes (Vitest) |
 
 ---
 
@@ -74,10 +78,11 @@ Built for a FIFA tournament on a typical hangout day: drinks with friends and ma
 
 ### What it does
 
-- **10 players** in **2 groups** (A and B, 5 each)
-- Group stage with rounds and byes
+- **Setup wizard** on first run: 2 to 24 players, teams optional, "fast" or "complete" presets (or fully custom)
+- Optional group stage (1 or 2 groups), with rounds and byes auto-generated for any group size
 - Automatic standings
-- Quarters, semis (home & away), 3rd place, and final
+- Knockout bracket generated from the player count — round of 16/quarters/semis/final as applicable, with an automatic preliminary round when the count doesn't fill a clean bracket
+- Single-leg or two-leg knockout, and an optional 3rd-place decider
 - Penalty shootouts when needed
 - Persistence via **SQLite** (`tournament.db`)
 - Standings/bracket page at `/classificacao` (nice for TV / sharing)
@@ -93,26 +98,28 @@ npm run dev
 
 2. Open [http://localhost:3000](http://localhost:3000).
 
-3. On tournament day:
-   - **Participants** → replace default names
-   - **Groups** → enter match scores
-   - **Standings** → see who advances
-   - When groups finish, **quarterfinals** unlock
-   - Continue through **semis → 3rd place → final**
-   - Use **Reset** to start over
+3. On first run, the app opens a **setup wizard**: register participants (and teams, optionally), pick the tournament format, and confirm — the group stage and knockout bracket are generated automatically.
 
-4. Display-only view: `/classificacao`.
+4. On tournament day:
+   - **Participants** → adjust names/teams anytime
+   - Stage/round tabs → enter match scores
+   - Each knockout stage unlocks as soon as the previous one is complete
+   - Use **Reset** to wipe everything and set up a new tournament via the wizard
+
+5. Display-only view: `/classificacao`.
 
 ### How to edit / contribute
 
 | What | Where |
 | --- | --- |
-| Default names, fixtures, standings rules | `src/utils/tournamentHelpers.ts` |
-| Types (`Participant`, `Match`, tournament state) | `src/types/tournament.ts` |
+| Tournament engine (bracket algorithms, fixtures, standings rules) | `src/utils/tournamentHelpers.ts` |
+| Types (`Participant`, `Match`, `ChampionshipConfig`, tournament state) | `src/types/tournament.ts` |
+| Setup wizard | `src/app/onboarding/`, `src/components/onboarding/` |
 | Main screen & tabs | `src/app/page.tsx` |
 | Match UI, bracket, tables | `src/components/` |
 | API + SQLite | `src/app/api/tournament/`, `src/utils/db.ts` |
 | Standings page | `src/app/classificacao/page.tsx` |
+| Tournament engine tests | `src/utils/tournamentHelpers.test.ts` |
 
 > `tournament.db` is local and gitignored. Each machine creates its own DB on first run.
 
@@ -124,7 +131,8 @@ npm run dev
 | `npm run build` | Production build |
 | `npm start` | Run production build |
 | `npm run lint` | ESLint |
+| `npm test` | Tests (Vitest) |
 
 ---
 
-Stack: **Next.js**, **React**, **Tailwind**, **better-sqlite3**.
+Stack: **Next.js**, **React**, **Tailwind**, **better-sqlite3**, **Vitest**.
